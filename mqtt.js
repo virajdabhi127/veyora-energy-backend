@@ -26,6 +26,11 @@ const client = mqtt.connect({
     reconnectPeriod: 5000
 });
 
+console.log("Host:", config.mqtt.host);
+console.log("Port:", config.mqtt.port);
+console.log("Username:", config.mqtt.username);
+console.log("Topic:", config.mqtt.topic);
+
 client.on("connect", () => {
     console.log("MQTT Connected");
     latestData.connected = true;
@@ -44,7 +49,7 @@ client.on("close", () => {
 });
 
 client.on("error", (err) => {
-    console.log(err.message);
+    console.error("MQTT Error:", err);
 });
 
 client.on("message", (topic, message) => {
