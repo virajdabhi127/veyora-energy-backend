@@ -29,7 +29,13 @@ const client = mqtt.connect({
 client.on("connect", () => {
     console.log("MQTT Connected");
     latestData.connected = true;
-    client.subscribe(config.mqtt.topic);
+    client.subscribe(config.mqtt.topic, (err) => {
+        if (err) {
+            console.log("Subscribe Failed");
+        } else {
+            console.log("Subscribed to", config.mqtt.topic);
+        }
+    });
 });
 
 client.on("close", () => {
