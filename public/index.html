@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Energy Monitor</title>
+     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&family=Work+Sans:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Smart Energy Monitor</h1>
+        <hr>
+        <div class="status">
+            <p><strong>Current Time :</strong>
+                <span id="currentTime">--:--:--</span>
+            </p>
+            <p><strong>Last Update :</strong>
+                <span id="lastUpdate">--:--:--</span>
+            </p>
+        </div>
+        <hr class="hr1">
+        <table>
+            <tr>
+                <td>Voltage</td>
+                <td><span id="voltage">0.00</span> V</td>
+            </tr>
+            <tr>
+                <td>Current</td>
+                <td><span id="current">0.00</span> A</td>
+            </tr>
+            <tr>
+                <td>Power Factor</td>
+                <td><span id="pf">0.00</span></td>
+            </tr>
+            <tr>
+                <td>Real Power</td>
+                <td><span id="realPower">0.00</span> W</td>
+            </tr>
+            <tr>
+                <td>Apparent Power</td>
+                <td><span id="apparentPower">0.00</span> VA</td>
+            </tr>
+            <tr>
+                <td>Energy</td>
+                <td><span id="energyWh">0.00</span> Wh</td>
+            </tr>
+            <tr>
+                <td>Total Energy</td>
+                <td><span id="energyKWh">0.000</span> kWh</td>
+            </tr>
+        </table>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
