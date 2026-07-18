@@ -1,3 +1,4 @@
+let lastEnergyTime = null;
 const mqtt = require("mqtt");
 const config = require("./config");
 const database = require("./database");
@@ -11,6 +12,7 @@ let latestData = {
     apparentPower: 0,
     energyWh: 0,
     energyKWh: database.loadEnergy(),
+    energyWh: database.loadEnergy() * 1000,
     connected: false,
     lastUpdate: "--:--:--"
 };
@@ -48,22 +50,26 @@ client.on("error", (err) => {
 });
 
 client.on("message", (topic, message) => {
-
     try {
         const data = JSON.parse(message.toString());
-
         latestData.voltage = Number(data.voltage) || 0;
         latestData.current = Number(data.current) || 0;
         latestData.pf = Number(data.pf) || 0;
         latestData.apparentPower = latestData.voltage * latestData.current;
         latestData.realPower = latestData.apparentPower * latestData.pf;
-        latestData.energyKWh = Number(data.energyKwh) || latestData.energyKWh;
-        latestData.energyWh = latestData.energyKWh * 1000;
-        latestData.lastUpdate = Date.now();
-
+        // ---------- Energy Calculation ----------
+        const now = Date.now();
+        if (lastEnergyTime !== null) {
+            const hours = (now - lastEnergyTime) / 3600000;
+            latestData.energyWh += latestData.realPower * hours;
+            latestData.energyKWh = latestData.energyWh / 1000;
+        }
+        lastEnergyTime = now;
+        // ---------------------------------------
+        latestData.lastUpdate = now;
         mqttEvents.emit("data", latestData);
-    }
 
+    }
     catch (err) {
         console.log("Invalid MQTT JSON");
     }
