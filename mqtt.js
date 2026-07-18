@@ -59,7 +59,7 @@ client.on("message", (topic, message) => {
         latestData.realPower = latestData.apparentPower * latestData.pf;
         latestData.energyKWh = Number(data.energyKwh) || latestData.energyKWh;
         latestData.energyWh = latestData.energyKWh * 1000;
-        latestData.lastUpdate = new Date().toLocaleTimeString("en-IN", {hour12: false});
+        latestData.lastUpdate = Date.now();
 
         mqttEvents.emit("data", latestData);
     }
