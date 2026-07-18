@@ -9,7 +9,6 @@ socket.on("disconnect", () => {
 });
 
 socket.on("update", (data) => {
-    document.getElementById("status").textContent = data.connectionStatus;
     document.getElementById("lastUpdate").textContent = data.lastUpdate;
     document.getElementById("voltage").textContent = data.voltage.toFixed(2);
     document.getElementById("current").textContent = data.current.toFixed(2);

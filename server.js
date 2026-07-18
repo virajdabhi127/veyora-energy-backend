@@ -20,8 +20,6 @@ const io = new Server(server, {
     }
 });
 
-app.use(express.static("public"));
-
 io.on("connection", (socket) => {
     console.log("Dashboard Connected");
     socket.emit("update", mqtt.latestData);
