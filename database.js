@@ -1,7 +1,7 @@
 const sqlite3 = require("sqlite3").verbose();
 const bcrypt = require("bcrypt");
-
-const db = new sqlite3.Database("./veyora.db", (err) => {
+const dbPath = process.env.DB_PATH || "./veyora.db";
+const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error("Database Error:", err.message);
     } 
