@@ -1,1 +1,5 @@
 node_modules/
+simulator.js
+assignDevice.js
+createUser.js
+veyora.db
