@@ -1,6 +1,7 @@
 node_modules/
 data/
 public/
+.env
 simulator.js
 assignDevice.js
 createUser.js
