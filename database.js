@@ -58,6 +58,34 @@ function createUser(userid, username, password, role, callback) {
     );
 }
 
+function ensureAdmin(callback) {
+    db.get(
+        "SELECT user_id FROM users WHERE role = 'admin'",
+        (err, row) => {
+            if (err) {
+                return callback(err);
+            }
+            if (row) {
+                return callback(null);
+            }
+            console.log("No admin found. Creating default admin...");
+            createUser(
+                process.env.DEFAULT_ADMIN_USER,
+                process.env.DEFAULT_ADMIN_NAME,
+                process.env.DEFAULT_ADMIN_PASSWORD,
+                "admin",
+                (err) => {
+                    if (err) {
+                        return callback(err);
+                    }
+                    console.log("Default admin created successfully.");
+                    callback(null);
+                }
+            );
+        }
+    );
+}
+
 function assignDevice(deviceId, userId, productCode, channelCount, callback) {
     db.get(
         "SELECT device_id FROM devices WHERE device_id = ?",
@@ -468,5 +496,6 @@ module.exports = {
     assignDevice,
     getUserByUserId,
     getUserByUsername,
-    getAllDevices
+    getAllDevices,
+    ensureAdmin
 };
