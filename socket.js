@@ -23,7 +23,6 @@ function initializeSocket(server, mqtt) {
         if (!rawCookie) {
             return next(new Error("Authentication required"));
         }
-
         const cookies = parse(rawCookie);
         const token = cookies.token;
 
@@ -48,24 +47,16 @@ function initializeSocket(server, mqtt) {
     });
 
     io.on("connection", (socket) => {
-
     socket.on("selectDevice", (deviceId) => {
-
-        // Security: user can only select their own devices
         if (!socket.devices.includes(deviceId)) {
             return;
         }
-
         socket.selectedDevice = deviceId;
-
         const device = mqtt.latestDevices.get(deviceId);
-
         if (device) {
             socket.emit("update", device);
         }
-
     });
-
 });
 
     mqtt.mqttEvents.on("data", (data) => {

@@ -1,16 +1,16 @@
 module.exports = {
     mqtt: {
-        host: "38283212ae99409b8e30f1f17de9a408.s1.eu.hivemq.cloud",
-        port: 8883,
-        username: "veyora.energymeter",
-        password: "Veyora.Energymeter",
-        topic: "energymeter/+/status"   // Change to your actual topic
+        host: process.env.MQTT_HOST,
+        port: Number(process.env.MQTT_PORT) || 8883,
+        username: process.env.MQTT_USERNAME,
+        password: process.env.MQTT_PASSWORD,
+        topic: process.env.MQTT_TOPIC || "energymeter/+/status"
     },
     server: {
         port: process.env.PORT || 3000
     },
     jwt: {
-        secret: "whatsyourplanfortoday",
+        secret: process.env.JWT_SECRET,
         expiresIn: "7d"
     },
     productCodes: {

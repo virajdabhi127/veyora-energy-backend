@@ -38,7 +38,6 @@ client.on("message", (topic, message) => {
             return;
         }
         if (!device) {
-            console.log(`Unknown Device: ${deviceId}`);
             return;
         }
         if (device.product_code !== config.productCodes[product]) {
