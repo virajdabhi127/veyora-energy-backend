@@ -36,9 +36,4 @@ app.use("/devices", deviceRoutes);
 
 server.listen(config.server.port, () => {
     console.log("SERVER_STARTED");
-    database.ensureAdmin((err) => {
-    if (err) {
-        console.error("Failed to create admin:", err.message);
-    }
-});
 });

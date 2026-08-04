@@ -145,62 +145,77 @@ function getUserByUserId(userid, callback) {
     );
 }
 
-db.run(`
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    userid TEXT UNIQUE NOT NULL,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'user'
-)
-`);
+db.serialize(() => {
+    db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userid TEXT UNIQUE NOT NULL,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user'
+    )
+    `);
 
-db.run(`
-CREATE TABLE IF NOT EXISTS devices (
-    device_id TEXT PRIMARY KEY,
-    user_id INTEGER,
-    product_code TEXT NOT NULL,
-    payload_version INTEGER DEFAULT 1,
-    channel_count INTEGER DEFAULT 1,
-    status INTEGER DEFAULT 0,
-    last_update DATETIME,
-    FOREIGN KEY(user_id) REFERENCES users(user_id)
-)
-`);
+    db.run(`
+    CREATE TABLE IF NOT EXISTS devices (
+        device_id TEXT PRIMARY KEY,
+        user_id INTEGER,
+        product_code TEXT NOT NULL,
+        payload_version INTEGER DEFAULT 1,
+        channel_count INTEGER DEFAULT 1,
+        status INTEGER DEFAULT 0,
+        last_update DATETIME,
+        FOREIGN KEY(user_id) REFERENCES users(user_id)
+    )
+    `);
 
-db.run(`
-CREATE TABLE IF NOT EXISTS energy_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    device_id TEXT NOT NULL,
-    energy_kwh REAL NOT NULL,
-    recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(device_id) REFERENCES devices(device_id)
-)
-`);
+    db.run(`
+    CREATE TABLE IF NOT EXISTS energy_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT NOT NULL,
+        energy_kwh REAL NOT NULL,
+        recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(device_id) REFERENCES devices(device_id)
+    )
+    `);
 
-db.run(`
-CREATE TABLE IF NOT EXISTS energy_daily_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    device_id TEXT NOT NULL,
-    history_date DATE NOT NULL,
-    energy_kwh REAL NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(device_id, history_date),
-    FOREIGN KEY(device_id) REFERENCES devices(device_id)
-)
-`);
+    db.run(`
+    CREATE TABLE IF NOT EXISTS energy_daily_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT NOT NULL,
+        history_date DATE NOT NULL,
+        energy_kwh REAL NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(device_id, history_date),
+        FOREIGN KEY(device_id) REFERENCES devices(device_id)
+    )
+    `);
 
-db.run(`
-CREATE TABLE IF NOT EXISTS energy_monthly_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    device_id TEXT NOT NULL,
-    history_month DATE NOT NULL,
-    energy_kwh REAL NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(device_id, history_month),
-    FOREIGN KEY(device_id) REFERENCES devices(device_id)
-)
-`);
+    db.run(`
+    CREATE TABLE IF NOT EXISTS energy_monthly_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT NOT NULL,
+        history_month DATE NOT NULL,
+        energy_kwh REAL NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(device_id, history_month),
+        FOREIGN KEY(device_id) REFERENCES devices(device_id)
+    )
+    `);
+    db.get("SELECT 1", (err) => {
+        if (err) {
+            console.error(err.message);
+            return;
+        }
+        ensureAdmin((err) => {
+            if (err) {
+                console.error("Failed to create admin:", err.message);
+            } else {
+                console.log("Admin initialization completed.");
+            }
+        });
+    });
+});
 
 function getAllEnergyHistory(callback) {
     db.all(
