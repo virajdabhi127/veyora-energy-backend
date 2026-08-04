@@ -1,40 +1,38 @@
 const express = require("express");
 const http = require("http");
-const { Server } = require("socket.io");
-
+const cors = require("cors");
+const helmet = require("helmet");
+const jwt = require("jsonwebtoken");
+const authRoutes = require("./routes/auth");
+const deviceRoutes = require("./routes/devices");
+const database = require("./database");
 const config = require("./config");
 const mqtt = require("./mqtt");
+const adminRoutes = require("./routes/admin");
+const cookieParser = require("cookie-parser");
+const initializeSocket = require("./socket");
 
 const app = express();
-
 const server = http.createServer(app);
 
-const io = new Server(server, {
-    cors: {
-        origin: [
-            "http://localhost:5500",
-            "http://localhost:3000",
-            "https://veyora.in"
-        ],
-        methods: ["GET", "POST"]
-    }
-});
+app.use(cors({
+    origin: [
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "https://veyora.in"
+    ],
+    credentials: true
+}));
 
-io.on("connection", (socket) => {
-    console.log("Dashboard Connected");
-    socket.emit("update", mqtt.latestData);
-    socket.on("disconnect", () => {
-        console.log("Dashboard Disconnected");
-    });
-});
+const io = initializeSocket(server, mqtt);
 
-mqtt.mqttEvents.on("data", (data) => {
-    io.emit("update", data);
-});
+app.use(helmet());
+app.use(express.json());
+app.use(cookieParser());
+app.use("/auth", authRoutes);
+app.use("/admin", adminRoutes);
+app.use("/devices", deviceRoutes);
 
 server.listen(config.server.port, () => {
-    console.log("--------------------------------");
-    console.log("Energy Monitor Started");
-    console.log("http://localhost:" + config.server.port);
-    console.log("--------------------------------");
+    console.log("SERVER_STARTED");
 });
