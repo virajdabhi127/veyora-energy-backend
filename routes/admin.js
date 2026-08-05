@@ -130,7 +130,7 @@ router.post("/assign-device", (req, res) => {
             deviceId,
             user.user_id,
             productCode,
-            parseInt(channelCount),
+            Number(channelCount),
             (err) => {
                 if (err) {
                     return res.status(400).json({
@@ -171,7 +171,7 @@ router.put("/device/:deviceId", (req, res) => {
             deviceId,
             user.user_id,
             productCode,
-            parseInt(channelCount),
+            Number(channelCount),
             (err) => {
                 if (err) {
                     return res.status(500).json({

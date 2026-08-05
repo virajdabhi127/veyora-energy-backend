@@ -34,6 +34,8 @@ app.use("/auth", authRoutes);
 app.use("/admin", adminRoutes);
 app.use("/devices", deviceRoutes);
 
-server.listen(config.server.port, () => {
-    console.log("SERVER_STARTED");
+database.init(() => {
+    server.listen(config.server.port, () => {
+        console.log("SERVER_STARTED");
+    });
 });
