@@ -38,60 +38,72 @@ function getISTMonth() {
 
 async function initializeDatabase() {
     await db.query(`
-    CREATE TABLE IF NOT EXISTS users (
-        user_id SERIAL PRIMARY KEY,
-        userid TEXT UNIQUE NOT NULL,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'user'
-    )
+        CREATE TABLE IF NOT EXISTS users (
+            user_id SERIAL PRIMARY KEY,
+            userid TEXT UNIQUE NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user'
+        )
     `);
 
     await db.query(`
-    CREATE TABLE IF NOT EXISTS devices (
-        device_id TEXT PRIMARY KEY,
-        user_id INTEGER,
-        product_code TEXT NOT NULL,
-        payload_version INTEGER DEFAULT 1,
-        channel_count INTEGER DEFAULT 1,
-        status INTEGER DEFAULT 0,
-        last_update TIMESTAMP,
-        FOREIGN KEY(user_id) REFERENCES users(user_id)
-    )
+        CREATE TABLE IF NOT EXISTS devices (
+            device_id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            product_code TEXT NOT NULL,
+            payload_version INTEGER DEFAULT 1,
+            channel_count INTEGER DEFAULT 1,
+            status INTEGER DEFAULT 0,
+            last_update TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        )
     `);
 
     await db.query(`
-    CREATE TABLE IF NOT EXISTS energy_history (
-        id SERIAL PRIMARY KEY,
-        device_id TEXT NOT NULL,
-        energy_kwh REAL NOT NULL,
-        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(device_id) REFERENCES devices(device_id)
-    )
+        CREATE TABLE IF NOT EXISTS energy_history (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            energy_kwh REAL NOT NULL,
+            recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(device_id) REFERENCES devices(device_id)
+        )
     `);
 
     await db.query(`
-    CREATE TABLE IF NOT EXISTS energy_daily_history (
-        id SERIAL PRIMARY KEY,
-        device_id TEXT NOT NULL,
-        history_date DATE NOT NULL,
-        energy_kwh REAL NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(device_id, history_date),
-        FOREIGN KEY(device_id) REFERENCES devices(device_id)
-    )
+        CREATE TABLE IF NOT EXISTS energy_daily_history (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            history_date DATE NOT NULL,
+            energy_kwh REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(device_id, history_date),
+            FOREIGN KEY(device_id) REFERENCES devices(device_id)
+        )
     `);
 
    await db.query(`
-    CREATE TABLE IF NOT EXISTS energy_monthly_history (
-        id SERIAL PRIMARY KEY,
-        device_id TEXT NOT NULL,
-        history_month DATE NOT NULL,
-        energy_kwh REAL NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(device_id, history_month),
-        FOREIGN KEY(device_id) REFERENCES devices(device_id)
-    )
+        CREATE TABLE IF NOT EXISTS energy_monthly_history (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            history_month DATE NOT NULL,
+            energy_kwh REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(device_id, history_month),
+            FOREIGN KEY(device_id) REFERENCES devices(device_id)
+        )
+    `);
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS device_channels (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            channel_id INTEGER NOT NULL,
+            channel_name TEXT NOT NULL,
+            UNIQUE(device_id, channel_id),
+            FOREIGN KEY(device_id)
+                REFERENCES devices(device_id)
+                ON DELETE CASCADE
+        )
     `);
     await new Promise((resolve, reject) => {
         ensureAdmin(err => err ? reject(err) : resolve());
@@ -197,14 +209,78 @@ function assignDevice(deviceId, userId, productCode, channelCount, callback) {
                     if (err) {
                         return callback(err);
                     }
-                    db.query(
-                        `INSERT INTO energy_history (device_id, energy_kwh)
-                         VALUES ($1, 0)`,
-                        [deviceId],
-                        callback
-                    );
+                    const channelValues = [];
+                    for (let i = 1; i <= channelCount; i++) {
+                        channelValues.push([
+                            deviceId,
+                            i,
+                            `Channel ${i}`
+                        ]);
+                    }
+                    const channelQuery = `
+                        INSERT INTO device_channels
+                        (
+                            device_id,
+                            channel_id,
+                            channel_name
+                        )
+                        VALUES ($1, $2, $3)
+                    `;
+                    let completed = 0;
+                    if (channelValues.length === 0) {
+                        createEnergyHistory();
+                        return;
+                    }
+                    channelValues.forEach(values => {
+                        db.query(
+                            channelQuery,
+                            values,
+                            (err) => {
+                                if (err) {
+                                    return callback(err);
+                                }
+                                completed++;
+                                if (completed === channelValues.length) {
+                                    createEnergyHistory();
+                                }
+                            }
+                        );
+                    });
+
+                    function createEnergyHistory() {
+                        db.query(
+                            `INSERT INTO energy_history
+                             (device_id, energy_kwh)
+                             VALUES ($1, 0)`,
+                            [deviceId],
+                            callback
+                        );
+                    }
                 }
             );
+        }
+    );
+}
+
+function renameDeviceChannel(deviceId, channelId, channelName, callback) {
+    const query = `
+        UPDATE device_channels
+        SET channel_name = $1
+        WHERE device_id = $2
+          AND channel_id = $3
+    `;
+    db.query(
+        query,
+        [channelName, deviceId, channelId],
+        (err, result) => {
+            if (err) {
+                console.error("Error renaming channel:", err);
+                return callback(err);
+            }
+            if (result.rowCount === 0) {
+                return callback(new Error("Channel not found."));
+            }
+            callback(null);
         }
     );
 }
@@ -281,21 +357,36 @@ function insertMonthlyHistory(deviceId, historyMonth, energyKWh, callback) {
     );
 }
 
-function saveMonthlyHistory(deviceId, energyKWh) {
-    const historyMonth = getISTMonth();
-    insertMonthlyHistory(
-        deviceId,
-        historyMonth,
-        energyKWh,
-        (err) => {
-            if (err) {
-                console.error("Monthly history update error:", err.message);
-            }
+function saveMonthlyHistory(deviceId, callback) {
+    const query = `
+        SELECT COALESCE(SUM(energy_kwh), 0) AS monthly_energy
+        FROM energy_daily_history
+        WHERE device_id = $1
+          AND history_date >= DATE_TRUNC(
+              'month',
+              CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata'
+          )::DATE
+          AND history_date <= (
+              CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata'
+          )::DATE
+    `;
+    db.query(query, [deviceId], (err, result) => {
+        if (err) {
+            console.error("Monthly energy calculation error:", err.message);
+            return callback(err);
         }
-    );
+        const monthlyEnergy = Number(result.rows[0].monthly_energy);
+        const historyMonth = getISTMonth();
+        insertMonthlyHistory(
+            deviceId,
+            historyMonth,
+            monthlyEnergy,
+            callback
+        );
+    });
 }
 
-function saveDailyHistory(deviceId, energyKWh) {
+function saveDailyHistory(deviceId, energyKWh, callback) {
     const historyDate = getISTDate();
     insertDailyHistory(
         deviceId,
@@ -303,7 +394,13 @@ function saveDailyHistory(deviceId, energyKWh) {
         energyKWh,
         (err) => {
             if (err) {
-                console.error("Daily history update error:", err.message);
+                console.error(
+                    "Daily history update error:",
+                    err.message
+                );
+            }
+            if (callback) {
+                callback(err);
             }
         }
     );
@@ -344,9 +441,23 @@ function saveEnergyHistory(deviceId, energyKWh) {
                 console.error("Energy update error:", err.message);
                 return;
             }
-
-            saveMonthlyHistory(deviceId, energyKWh);
-            saveDailyHistory(deviceId, energyKWh);
+            saveDailyHistory(deviceId, energyKWh, (dailyErr) => {
+                if (dailyErr) {
+                    console.error(
+                        "Daily history update error:",
+                        dailyErr.message
+                    );
+                    return;
+                }
+                saveMonthlyHistory(deviceId, (monthlyErr) => {
+                    if (monthlyErr) {
+                        console.error(
+                            "Monthly history update error:",
+                            monthlyErr.message
+                        );
+                    }
+                });
+            });
         }
     );
 }
@@ -489,7 +600,6 @@ function updatedevice(deviceId, userId, productCode, channelCount, callback) {
 function deleteDevice(deviceId, callback) {
     db.query("BEGIN", (err) => {
         if (err) return callback(err);
-
         db.query(
             "DELETE FROM energy_history WHERE device_id = $1",
             [deviceId],
@@ -497,7 +607,6 @@ function deleteDevice(deviceId, callback) {
                 if (err) {
                     return db.query("ROLLBACK", () => callback(err));
                 }
-
                 db.query(
                     "DELETE FROM energy_daily_history WHERE device_id = $1",
                     [deviceId],
@@ -505,7 +614,6 @@ function deleteDevice(deviceId, callback) {
                         if (err) {
                             return db.query("ROLLBACK", () => callback(err));
                         }
-
                         db.query(
                             "DELETE FROM energy_monthly_history WHERE device_id = $1",
                             [deviceId],
@@ -513,7 +621,6 @@ function deleteDevice(deviceId, callback) {
                                 if (err) {
                                     return db.query("ROLLBACK", () => callback(err));
                                 }
-
                                 db.query(
                                     "DELETE FROM devices WHERE device_id = $1",
                                     [deviceId],
@@ -521,7 +628,6 @@ function deleteDevice(deviceId, callback) {
                                         if (err) {
                                             return db.query("ROLLBACK", () => callback(err));
                                         }
-
                                         db.query("COMMIT", callback);
                                     }
                                 );
@@ -544,6 +650,195 @@ function getAdminStats(callback) {
         }
     );
 }
+
+function getDailyEnergy(deviceId, callback) {
+    const query = `
+        SELECT
+            COALESCE(
+                MAX(CASE
+                    WHEN history_date =
+                        (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE
+                    THEN energy_kwh
+                END),
+                0
+            ) AS today,
+            COALESCE(
+                MAX(CASE
+                    WHEN history_date =
+                        (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE - 1
+                    THEN energy_kwh
+                END),
+                0
+            ) AS yesterday
+        FROM energy_daily_history
+        WHERE device_id = $1
+          AND history_date >=
+              (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE - 1
+    `;
+    db.query(query, [deviceId], (err, result) => {
+        if (err) {
+            console.error("Error fetching daily energy:", err);
+            return callback(err, null);
+        }
+        const row = result.rows[0];
+        callback(null, {
+            today: Number(row.today),
+            yesterday: Number(row.yesterday)
+        });
+    });
+}
+
+function getMonthlyEnergy(deviceId, callback) {
+    const query = `
+        SELECT
+            COALESCE(
+                MAX(
+                    CASE
+                        WHEN history_month =
+                            DATE_TRUNC(
+                                'month',
+                                CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata'
+                            )::DATE
+                        THEN energy_kwh
+                    END
+                ),
+                0
+            ) AS current_month,
+
+            COALESCE(
+                MAX(
+                    CASE
+                        WHEN history_month =
+                            (
+                                DATE_TRUNC(
+                                    'month',
+                                    CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata'
+                                ) - INTERVAL '1 month'
+                            )::DATE
+                        THEN energy_kwh
+                    END
+                ),
+                0
+            ) AS previous_month
+
+        FROM energy_monthly_history
+        WHERE device_id = $1
+          AND history_month >= (
+              DATE_TRUNC(
+                  'month',
+                  CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata'
+              ) - INTERVAL '1 month'
+          )::DATE
+    `;
+    db.query(query, [deviceId], (err, result) => {
+        if (err) {
+            console.error("Error fetching monthly energy:", err);
+            return callback(err, null);
+        }
+        const row = result.rows[0];
+        const currentMonth = Number(row.current_month);
+        const previousMonth = Number(row.previous_month);
+        /*
+         * Today's energy
+         *
+         * Current month-to-date consumption
+         * minus previous month's stored cumulative value
+         * is NOT used here.
+         *
+         * We get today's value from daily history.
+         */
+        const dailyQuery = `
+            SELECT
+                COALESCE(
+                    energy_kwh,
+                    0
+                ) AS today_energy
+            FROM energy_daily_history
+            WHERE device_id = $1
+              AND history_date =
+                  (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE
+            LIMIT 1
+        `;
+        db.query(dailyQuery, [deviceId], (err, dailyResult) => {
+            if (err) {
+                console.error(
+                    "Error fetching today's energy:",
+                    err
+                );
+                return callback(err, null);
+            }
+            const todayEnergy =
+                dailyResult.rows.length > 0
+                    ? Number(dailyResult.rows[0].today_energy)
+                    : 0;
+            const monthlyCost = calculatePGVCLCost(currentMonth);
+            const todayCost =
+                calculatePGVCLTodayCost(
+                    currentMonth,
+                    todayEnergy
+                );
+            callback(null, {
+                currentMonth,
+                previousMonth,
+                todayEnergy,
+                monthlyCost,
+                todayCost
+            });
+        });
+    });
+}
+
+function getDeviceChannels(deviceId, callback) {
+    const query = `
+        SELECT
+            channel_id,
+            channel_name
+        FROM device_channels
+        WHERE device_id = $1
+        ORDER BY channel_id ASC
+    `;
+    db.query(query, [deviceId], (err, result) => {
+        if (err) {
+            console.error("Error fetching device channels:", err);
+            return callback(err, null);
+        }
+        callback(null, result.rows);
+    });
+}
+
+function calculatePGVCLCost(units) {
+    units = Number(units);
+    if (!Number.isFinite(units) || units <= 0) {
+        return 0;
+    }
+    let cost = 0;
+    if (units <= 50) {
+        cost = units * 3.05;
+    } else if (units <= 100) {
+        cost = (50 * 3.05) + ((units - 50) * 3.50);
+    } else if (units <= 250) {
+        cost = (50 * 3.05) + (50 * 3.50) + ((units - 100) * 4.15);
+    } else {
+        cost = (50 * 3.05) + (50 * 3.50) + (150 * 4.15) + ((units - 250) * 5.20);
+    }
+    return Number(cost.toFixed(2));
+}
+
+function calculatePGVCLTodayCost(monthlyEnergy, todayEnergy) {
+    monthlyEnergy = Number(monthlyEnergy);
+    todayEnergy = Number(todayEnergy);
+    if (!Number.isFinite(monthlyEnergy) || !Number.isFinite(todayEnergy) || monthlyEnergy <= 0 || todayEnergy <= 0) {
+        return 0;
+    }
+    const previousMonthEnergy = Math.max(
+        0,
+        monthlyEnergy - todayEnergy
+    );
+    const currentCost = calculatePGVCLCost(monthlyEnergy);
+    const previousCost = calculatePGVCLCost(previousMonthEnergy);
+    return Number((currentCost - previousCost).toFixed(2));
+}
+
 module.exports = {
     getUser,
     init,
@@ -568,5 +863,9 @@ module.exports = {
     getUserByUserId,
     getUserByUsername,
     getAllDevices,
-    ensureAdmin
+    ensureAdmin,
+    getDailyEnergy,
+    getMonthlyEnergy,
+    getDeviceChannels,
+    renameDeviceChannel
 };

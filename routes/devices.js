@@ -20,4 +20,113 @@ router.get("/", authenticate, (req, res) => {
     });
 });
 
+router.get("/:deviceId/daily-energy", authenticate, (req, res) => {
+    const deviceId = req.params.deviceId;
+    database.getDailyEnergy(deviceId, (err, energy) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: "Database error."
+            });
+        }
+        res.json({
+            success: true,
+            deviceId: deviceId,
+            today: energy.today,
+            yesterday: energy.yesterday
+        });
+    });
+});
+
+router.get("/:deviceId/monthly-energy", authenticate, (req, res) => {
+    const deviceId = req.params.deviceId;
+    database.getMonthlyEnergy(deviceId, (err, energy) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: "Database error."
+            });
+        }
+        res.json({
+            success: true,
+            deviceId: deviceId,
+            // Energy
+            currentMonth: energy.currentMonth,
+            previousMonth: energy.previousMonth,
+            // Today's usage
+            todayEnergy: energy.todayEnergy,
+            // PGVCL estimated energy charges
+            monthlyCost: energy.monthlyCost,
+            todayCost: energy.todayCost
+        });
+    });
+});
+
+router.get("/:deviceId/channels", authenticate, (req, res) => {
+    const deviceId = req.params.deviceId;
+    database.getDeviceChannels(deviceId, (err, channels) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: "Database error."
+            });
+        }
+        res.json({
+            success: true,
+            deviceId: deviceId,
+            channels
+        });
+    });
+});
+
+router.put("/:deviceId/channels/:channelId", authenticate, (req, res) => {
+    const deviceId = req.params.deviceId;
+    const channelId = Number(req.params.channelId);
+    const channelName = req.body.channelName;
+    if (!Number.isInteger(channelId) || channelId < 1) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid channel ID."
+        });
+    }
+    if (
+        typeof channelName !== "string" ||
+        channelName.trim().length === 0
+    ) {
+        return res.status(400).json({
+            success: false,
+            message: "Channel name cannot be empty."
+        });
+    }
+    if (channelName.trim().length > 30) {
+        return res.status(400).json({
+            success: false,
+            message: "Channel name must be 30 characters or less."
+        });
+    }
+    database.renameDeviceChannel(
+        deviceId,
+        channelId,
+        channelName.trim(),
+        (err) => {
+            if (err) {
+                if (err.message === "Channel not found.") {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Channel not found."
+                    });
+                }
+                return res.status(500).json({
+                    success: false,
+                    message: "Database error."
+                });
+            }
+            res.json({
+                success: true,
+                message: "Channel name updated successfully."
+            });
+        }
+    );
+});
+
 module.exports = router;
