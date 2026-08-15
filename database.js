@@ -76,6 +76,7 @@ async function initializeDatabase() {
             device_id TEXT NOT NULL,
             history_date DATE NOT NULL,
             energy_kwh REAL NOT NULL,
+            start_energy_kwh REAL NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(device_id, history_date),
             FOREIGN KEY(device_id) REFERENCES devices(device_id)
@@ -93,6 +94,7 @@ async function initializeDatabase() {
             FOREIGN KEY(device_id) REFERENCES devices(device_id)
         )
     `);
+
     await db.query(`
         CREATE TABLE IF NOT EXISTS device_channels (
             id SERIAL PRIMARY KEY,
@@ -105,6 +107,31 @@ async function initializeDatabase() {
                 ON DELETE CASCADE
         )
     `);
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS load_history (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            real_power REAL NOT NULL,
+            recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (device_id) REFERENCES devices(device_id)
+        );
+    `)
+
+    await db.query(`
+         CREATE TABLE IF NOT EXISTS load_daily_history (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            history_date DATE NOT NULL,
+            peak_load REAL NOT NULL,
+            peak_load_time TIMESTAMP,
+            base_load REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (device_id, history_date),
+            FOREIGN KEY (device_id) REFERENCES devices(device_id)
+        );
+    `)
+
     await new Promise((resolve, reject) => {
         ensureAdmin(err => err ? reject(err) : resolve());
     });
@@ -876,6 +903,324 @@ function calculatePGVCLTodayCost(monthlyEnergy, todayEnergy) {
     return Number((currentCost - previousCost).toFixed(2));
 }
 
+function saveLoadHistory(deviceId, realPower, callback) {
+    const query = `
+        INSERT INTO load_history (device_id, real_power, recorded_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+    `;
+    db.query(query, [deviceId, realPower], (err, result) => {
+        if (callback) {
+            callback(err, result);
+        }
+    });
+}
+
+function calculateDailyLoad(deviceId, historyDate, callback) {
+    const query = `
+        WITH daily_data AS (
+            SELECT real_power, recorded_at
+            FROM load_history
+            WHERE device_id = $1
+            AND recorded_at >= $2::date
+            AND recorded_at <= ($2::date + INTERVAL '23 hours 59 minutes 50 seconds')
+        ),
+        ranked_data AS (
+            SELECT
+                real_power,
+                recorded_at,
+                ROW_NUMBER() OVER (ORDER BY real_power ASC) AS rn,
+                COUNT(*) OVER () AS total_count
+            FROM daily_data
+        ),
+        stats AS (
+            SELECT
+                MAX(real_power) AS peak_load,
+                (
+                    SELECT recorded_at
+                    FROM daily_data
+                    ORDER BY real_power DESC, recorded_at ASC
+                    LIMIT 1
+                ) AS peak_load_time,
+
+                AVG(real_power) FILTER (
+                    WHERE rn <= CEIL(total_count * 0.10)
+                ) AS base_load
+
+            FROM ranked_data
+        )
+        INSERT INTO load_daily_history (
+            device_id,
+            history_date,
+            peak_load,
+            peak_load_time,
+            base_load
+        )
+        SELECT
+            $1,
+            $2::date,
+            peak_load,
+            peak_load_time,
+            base_load
+        FROM stats
+        WHERE peak_load IS NOT NULL
+        ON CONFLICT (device_id, history_date)
+        DO UPDATE SET
+            peak_load = EXCLUDED.peak_load,
+            peak_load_time = EXCLUDED.peak_load_time,
+            base_load = EXCLUDED.base_load;
+    `;
+    db.query(query, [deviceId, historyDate], (err, result) => {
+        if (callback) {
+            callback(err, result);
+        }
+    });
+}
+
+function finalizeAndCleanupDailyLoad(deviceId, historyDate, callback) {
+    // First calculate and store the daily peak/base
+    calculateDailyLoad(deviceId, historyDate, (err) => {
+        if (err) {
+            console.error(
+                `Daily load calculation failed for ${deviceId}:`,
+                err.message
+            );
+            if (callback) callback(err);
+            return;
+        }
+        // Verify that the daily summary exists
+        const verifyQuery = `
+            SELECT
+                peak_load,
+                peak_load_time,
+                base_load
+            FROM load_daily_history
+            WHERE device_id = $1
+              AND history_date = $2::date
+              AND peak_load IS NOT NULL
+              AND base_load IS NOT NULL
+        `;
+        db.query(
+            verifyQuery,
+            [deviceId, historyDate],
+            (err, result) => {
+                if (err) {
+                    console.error(
+                        "Daily load verification failed:",
+                        err.message
+                    );
+                    if (callback) callback(err);
+                    return;
+                }
+                // No valid daily summary → DO NOT DELETE
+                if (result.rows.length === 0) {
+                    console.error(
+                        `Daily load summary missing for ${deviceId} on ${historyDate}. Load history NOT deleted.`
+                    );
+                    if (callback) {
+                        callback(
+                            new Error(
+                                "Daily load summary not found. Load history was not deleted."
+                            )
+                        );
+                    }
+                    return;
+                }
+                // Now verify that the final 10-second reading exists
+                const finalReadingQuery = `
+                    SELECT recorded_at
+                    FROM load_history
+                    WHERE device_id = $1
+                      AND recorded_at >= $2::date
+                      AND recorded_at <= (
+                          $2::date +
+                          INTERVAL '23 hours 59 minutes 50 seconds'
+                      )
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                `;
+                db.query(
+                    finalReadingQuery,
+                    [deviceId, historyDate],
+                    (err, readingResult) => {
+                        if (err) {
+                            console.error(
+                                "Final load reading check failed:",
+                                err.message
+                            );
+                            if (callback) callback(err);
+                            return;
+                        }
+                        if (readingResult.rows.length === 0) {
+                            console.error(
+                                `No load reading found for ${deviceId} on ${historyDate}. Load history NOT deleted.`
+                            );
+                            if (callback) {
+                                callback(
+                                    new Error(
+                                        "Final load reading missing. Load history was not deleted."
+                                    )
+                                );
+                            }
+                            return;
+                        }
+                        const lastReading = readingResult.rows[0].recorded_at;
+                        console.log(
+                            `Daily load verified for ${deviceId} on ${historyDate}.`
+                        );
+                        console.log(
+                            `Final recorded load reading: ${lastReading}`
+                        );
+                        // Everything is valid → delete old temporary data
+                        const deleteQuery = `
+                            DELETE FROM load_history
+                            WHERE device_id = $1
+                              AND recorded_at >= $2::date
+                              AND recorded_at < (
+                                  $2::date + INTERVAL '1 day'
+                              )
+                        `;
+                        db.query(
+                            deleteQuery,
+                            [deviceId, historyDate],
+                            (err, deleteResult) => {
+                                if (err) {
+                                    console.error(
+                                        "Load history deletion failed:",
+                                        err.message
+                                    );
+                                    if (callback) callback(err);
+                                    return;
+                                }
+                                console.log(
+                                    `Deleted ${deleteResult.rowCount} load history records for ${deviceId} on ${historyDate}.`
+                                );
+                                if (callback) {
+                                    callback(null, deleteResult);
+                                }
+                            }
+                        );
+                    }
+                );
+            }
+        );
+    });
+}
+
+function verifyDailyLoad(deviceId, historyDate, callback) {
+    const query = `
+        SELECT peak_load, peak_load_time, base_load
+        FROM load_daily_history
+        WHERE device_id = $1
+          AND history_date = $2::date
+          AND peak_load IS NOT NULL
+          AND base_load IS NOT NULL
+        LIMIT 1
+    `;
+    db.query(query, [deviceId, historyDate], (err, result) => {
+        if (err) {
+            callback(err, null);
+            return;
+        }
+        callback(null, result);
+    });
+}
+
+function verifyFinalLoadReading(deviceId, historyDate, callback) {
+    const query = `
+        SELECT recorded_at
+        FROM load_history
+        WHERE device_id = $1
+          AND recorded_at = (
+              $2::date + INTERVAL '23 hours 59 minutes 50 seconds'
+          )
+        LIMIT 1
+    `;
+    db.query(query, [deviceId, historyDate], (err, result) => {
+        if (err) {
+            callback(err, null);
+            return;
+        }
+        callback(null, result);
+    });
+}
+
+function deleteDailyLoadHistory(deviceId, historyDate, callback) {
+    const query = `
+        DELETE FROM load_history
+        WHERE device_id = $1
+          AND recorded_at >= $2::date
+          AND recorded_at < ($2::date + INTERVAL '1 day')
+    `;
+    db.query(query, [deviceId, historyDate], (err, result) => {
+        if (err) {
+            callback(err, null);
+            return;
+        }
+        callback(null, result);
+    });
+}
+
+function getLoadHistory(deviceId, callback) {
+    const query = `
+        SELECT
+            real_power,
+            recorded_at
+        FROM load_history
+        WHERE device_id = $1
+          AND recorded_at >= CURRENT_DATE
+          AND recorded_at < (CURRENT_DATE + INTERVAL '1 day')
+        ORDER BY recorded_at ASC
+    `;
+    db.query(query, [deviceId], (err, result) => {
+        if (err) {
+            callback(err, null);
+            return;
+        }
+        callback(null, result.rows);
+    });
+}
+
+function getDailyLoad(deviceId, callback) {
+    const query = `
+        SELECT
+            history_date,
+            peak_load,
+            peak_load_time,
+            base_load
+        FROM load_daily_history
+        WHERE device_id = $1
+          AND history_date = CURRENT_DATE
+        LIMIT 1
+    `;
+    db.query(query, [deviceId], (err, result) => {
+        if (err) {
+            callback(err, null);
+            return;
+        }
+        callback(null, result.rows[0] || null);
+    });
+}
+
+function getMonthlyLoad(deviceId, callback) {
+    const query = `
+        SELECT
+            history_date,
+            energy_kwh
+        FROM energy_daily_history
+        WHERE device_id = $1
+          AND history_date >= DATE_TRUNC('month', CURRENT_DATE)
+          AND history_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+        ORDER BY history_date ASC
+    `;
+    db.query(query, [deviceId], (err, result) => {
+        if (err) {
+            callback(err, null);
+            return;
+        }
+        callback(null, result.rows);
+    });
+}
+
 module.exports = {
     getUser,
     init,
@@ -904,5 +1249,14 @@ module.exports = {
     getDailyEnergy,
     getMonthlyEnergy,
     getDeviceChannels,
-    renameDeviceChannel
+    renameDeviceChannel,
+    saveLoadHistory,
+    calculateDailyLoad,
+    finalizeAndCleanupDailyLoad,
+    verifyDailyLoad,
+    verifyFinalLoadReading,
+    deleteDailyLoadHistory,
+    getLoadHistory,
+    getDailyLoad,
+    getMonthlyLoad
 };

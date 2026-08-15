@@ -129,4 +129,55 @@ router.put("/:deviceId/channels/:channelId", authenticate, (req, res) => {
     );
 });
 
+router.get("/:deviceId/load-history", authenticate, (req, res) => {
+    const deviceId = req.params.deviceId;
+    database.getLoadHistory(deviceId, (err, history) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: "Database error."
+            });
+        }
+        res.json({
+            success: true,
+            deviceId: deviceId,
+            history
+        });
+    });
+});
+
+router.get("/:deviceId/daily-load", authenticate, (req, res) => {
+    const deviceId = req.params.deviceId;
+    database.getDailyLoad(deviceId, (err, load) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: "Database error."
+            });
+        }
+        res.json({
+            success: true,
+            deviceId: deviceId,
+            load
+        });
+    });
+});
+
+router.get("/:deviceId/monthly-load", authenticate, (req, res) => {
+    const deviceId = req.params.deviceId;
+    database.getMonthlyLoad(deviceId, (err, load) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: "Database error."
+            });
+        }
+        res.json({
+            success: true,
+            deviceId: deviceId,
+            load
+        });
+    });
+});
+
 module.exports = router;
