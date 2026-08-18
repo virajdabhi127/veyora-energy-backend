@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const database = require("../database");
+const mqtt = require("../mqtt");
 const authenticate = require("../middleware/auth");
 
 router.get("/", authenticate, (req, res) => {
@@ -127,6 +128,201 @@ router.put("/:deviceId/channels/:channelId", authenticate, (req, res) => {
             });
         }
     );
+});
+
+router.get("/:deviceId/wifi", authenticate, async (req, res) => {
+    const deviceId = req.params.deviceId;
+    try {
+        const device = await new Promise((resolve, reject) => {
+            database.getDevice(
+                deviceId,
+                (err, device) => {
+                    if (err) {
+                        reject(err);
+                        return;
+                    }
+                    resolve(device);
+                }
+            );
+        });
+        if (!device) {
+            return res.status(404).json({
+                success: false,
+                message: "Device not found."
+            });
+        }
+        const wifi = await mqtt.requestWiFi(deviceId, 5000);
+        res.json({
+            success: true,
+            deviceId,
+            ...wifi
+        });
+    } catch (err) {
+        console.error(
+            `Failed to get Wi-Fi for ${deviceId}:`,
+            err.message
+        );
+        return res.status(504).json({
+            success: false,
+            message: "Device did not respond."
+        });
+    }
+});
+
+router.delete("/:deviceId/wifi/:wifiId", authenticate, async (req, res) => {
+    const deviceId = req.params.deviceId;
+    const wifiId = Number(req.params.wifiId);
+    if (!Number.isInteger(wifiId) || wifiId < 0 || wifiId >= 5) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid Wi-Fi ID."
+        });
+    }
+    try {
+        const device = await new Promise((resolve, reject) => {
+            database.getDevice(
+                deviceId,
+                (err, device) => {
+                    if (err) {
+                        reject(err);
+                        return;
+                    }
+                    resolve(device);
+                }
+            );
+
+        });
+        if (!device) {
+            return res.status(404).json({
+                success: false,
+                message: "Device not found."
+            });
+        }
+        const result = await mqtt.deleteWiFi(
+            deviceId,
+            wifiId,
+            5000
+        );
+        if (!result.success) {
+            return res.status(400).json({
+                success: false,
+                message: result.message || "Failed to delete Wi-Fi network."
+            });
+        }
+        return res.json({
+            success: true,
+            message: result.message ||
+                "Wi-Fi network deleted successfully."
+        });
+    } catch (err) {
+        console.error(
+            `Failed to delete Wi-Fi ${wifiId} from ${deviceId}:`,
+            err.message
+        );
+        return res.status(504).json({
+            success: false,
+            message: "Device did not respond."
+        });
+    }
+});
+
+router.post("/:deviceId/wifi", authenticate, async (req, res) => {
+
+    const deviceId = req.params.deviceId;
+
+    const ssid = req.body.ssid;
+    const password = req.body.password;
+
+    if (
+        typeof ssid !== "string" ||
+        ssid.trim().length === 0
+    ) {
+        return res.status(400).json({
+            success: false,
+            message: "Wi-Fi name cannot be empty."
+        });
+    }
+
+    if (
+        typeof password !== "string" ||
+        password.length === 0
+    ) {
+        return res.status(400).json({
+            success: false,
+            message: "Wi-Fi password cannot be empty."
+        });
+    }
+
+    if (ssid.trim().length > 32) {
+        return res.status(400).json({
+            success: false,
+            message: "Wi-Fi name must be 32 characters or less."
+        });
+    }
+
+    try {
+
+        const device = await new Promise((resolve, reject) => {
+
+            database.getDevice(
+                deviceId,
+                (err, device) => {
+
+                    if (err) {
+                        reject(err);
+                        return;
+                    }
+
+                    resolve(device);
+                }
+            );
+
+        });
+
+        if (!device) {
+
+            return res.status(404).json({
+                success: false,
+                message: "Device not found."
+            });
+        }
+
+        const result = await mqtt.addWiFi(
+            deviceId,
+            ssid.trim(),
+            password,
+            5000
+        );
+
+        if (!result.success) {
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    result.message ||
+                    "Failed to add Wi-Fi network."
+            });
+        }
+
+        return res.json({
+            success: true,
+            message:
+                result.message ||
+                "Wi-Fi network added successfully."
+        });
+
+    } catch (err) {
+
+        console.error(
+            `Failed to add Wi-Fi to ${deviceId}:`,
+            err.message
+        );
+
+        return res.status(504).json({
+            success: false,
+            message: "Device did not respond."
+        });
+    }
 });
 
 router.get("/:deviceId/load-history", authenticate, (req, res) => {

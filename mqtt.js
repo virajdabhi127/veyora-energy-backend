@@ -7,6 +7,7 @@ const mqttEvents = new EventEmitter();
 const latestDevices = new Map();
 const lastLoadHistorySave = new Map();
 const dailyLoadFinalized = new Map();
+const pendingWiFiRequests = new Map();
 
 const client = mqtt.connect({
     host: config.mqtt.host,
@@ -19,11 +20,18 @@ const client = mqtt.connect({
 
 client.on("connect", () => {
     console.log("MQTT Connected");
-    client.subscribe(config.mqtt.topic, (err) => {
-        if (err) {
-            console.error("Subscribe Failed:", err.message);
-        } 
-    });
+    client.subscribe(
+        [
+            config.mqtt.topic,
+            "energymeter/+/wifi"
+        ],
+        (err) => {
+            if (err) {
+                console.error("Subscribe Failed:",err.message);
+                return;
+            }
+        }
+    );
 });
 
 client.on("error", (err) => {
@@ -34,6 +42,34 @@ client.on("message", (topic, message) => {
     const parts = topic.split("/");
     const product = parts[0];
     const deviceId = parts[1];
+    const messageType = parts[2];
+    if (messageType === "wifi") {
+        try {
+            const data = JSON.parse(
+                message.toString()
+            );
+            if (typeof data !== "object" || data === null) {
+                console.error(
+                    `Invalid Wi-Fi response from ${deviceId}`
+                );
+                return;
+            }
+            const pending = pendingWiFiRequests.get(deviceId);
+            if (pending) {
+                clearTimeout(pending.timeout);
+                pending.resolve(data);
+                pendingWiFiRequests.delete(deviceId);
+            }
+        } catch (err) {
+
+            console.error(
+                `Invalid Wi-Fi JSON from ${deviceId}:`,
+                err.message
+            );
+        }
+
+        return;
+    }
     database.getDevice(deviceId, (err, device) => {
         if (err) {
             console.error("Database Error:", err.message);
@@ -61,6 +97,7 @@ client.on("message", (topic, message) => {
                     product,
                     payloadVersion: 0,
                     channelCount: 0,
+                    activeWifiId: -1,
                     voltage: 0,
                     totalCurrent: 0,
                     totalRealPower: 0,
@@ -96,6 +133,11 @@ client.on("message", (topic, message) => {
                     channelCount
                 );
             }
+            deviceData.activeWifiId =
+            data.wifi &&
+            data.wifi.activeWifiId !== undefined
+                ? Number(data.wifi.activeWifiId)
+                : -1;
             deviceData.voltage = Number(data.voltage) || 0;
             deviceData.totalCurrent = Number(data.totalCurrent) || 0;
             deviceData.channels = Array.isArray(data.channels) ? data.channels : [];
@@ -180,9 +222,6 @@ function checkDailyLoadRollover(deviceId) {
                 );
                 return;
             }
-            console.log(
-                `Daily load calculated for ${deviceId} on ${historyDate}`
-            );
             database.verifyDailyLoad(
                 deviceId,
                 historyDate,
@@ -200,9 +239,6 @@ function checkDailyLoadRollover(deviceId) {
                         );
                         return;
                     }
-                    console.log(
-                        `Daily load summary verified for ${deviceId} on ${historyDate}.`
-                    );
                     database.verifyFinalLoadReading(
                         deviceId,
                         historyDate,
@@ -220,9 +256,6 @@ function checkDailyLoadRollover(deviceId) {
                                 );
                                 return;
                             }
-                            console.log(
-                                `Final load reading verified for ${deviceId} on ${historyDate}.`
-                            );
                             database.deleteDailyLoadHistory(
                                 deviceId,
                                 historyDate,
@@ -234,10 +267,6 @@ function checkDailyLoadRollover(deviceId) {
                                         );
                                         return;
                                     }
-
-                                    console.log(
-                                        `Deleted ${result.rowCount} load history records for ${deviceId} on ${historyDate}.`
-                                    );
                                 }
                             );
                         }
@@ -269,9 +298,6 @@ function finalizePreviousDayLoad(deviceId) {
                 );
                 return;
             }
-            console.log(
-                `Daily load finalized for ${deviceId}: ${yesterdayDate}`
-            );
             dailyLoadFinalized.set(deviceId, todayDate);
         }
     );
@@ -299,7 +325,129 @@ setInterval(() => {
     }
 }, 10000);
 
+function requestWiFi(deviceId, timeout = 5000) {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            pendingWiFiRequests.delete(deviceId);
+            reject(
+                new Error(
+                    "ESP did not respond in time."
+                )
+            );
+        }, timeout);
+        pendingWiFiRequests.set(
+            deviceId,
+            {
+                resolve,
+                reject,
+                timeout: timeoutId
+            }
+        );
+        const topic =`energymeter/${deviceId}/command`;
+        const payload = JSON.stringify({action: "get_wifi"});
+        client.publish(
+            topic,
+            payload,
+            (err) => {
+                if (err) {
+                    clearTimeout(timeoutId);
+                    pendingWiFiRequests.delete(
+                        deviceId
+                    );
+                    reject(err);
+                    return;
+                }
+            }
+        );
+    });
+}
+
+function deleteWiFi(deviceId, wifiId, timeout = 5000) {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            pendingWiFiRequests.delete(deviceId);
+            reject(
+                new Error(
+                    "ESP did not respond in time."
+                )
+            );
+        }, timeout);
+        pendingWiFiRequests.set(
+            deviceId,
+            {
+                resolve,
+                reject,
+                timeout: timeoutId
+            }
+        );
+        const topic = `energymeter/${deviceId}/command`;
+        const payload = JSON.stringify({
+            action: "delete_wifi",
+            id: wifiId
+        });
+        client.publish(
+            topic,
+            payload,
+            (err) => {
+                if (err) {
+                    clearTimeout(timeoutId);
+                    pendingWiFiRequests.delete(
+                        deviceId
+                    );
+                    reject(err);
+                    return;
+                }
+            }
+        );
+    });
+}
+
+function addWiFi(deviceId, ssid, password, timeout = 5000) {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            pendingWiFiRequests.delete(deviceId);
+            reject(
+                new Error(
+                    "ESP did not respond in time."
+                )
+            );
+
+        }, timeout);
+        pendingWiFiRequests.set(
+            deviceId,
+            {
+                resolve,
+                reject,
+                timeout: timeoutId
+            }
+        );
+        const topic =  `energymeter/${deviceId}/command`;
+        const payload = JSON.stringify({
+            action: "add_wifi",
+            ssid,
+            password
+        });
+        client.publish(
+            topic,
+            payload,
+            (err) => {
+                if (err) {
+                    clearTimeout(timeoutId);
+                    pendingWiFiRequests.delete(
+                        deviceId
+                    );
+                    reject(err);
+                    return;
+                }
+            }
+        );
+    });
+}
+
 module.exports = {
     latestDevices,
-    mqttEvents
+    mqttEvents,
+    deleteWiFi,
+    requestWiFi,
+    addWiFi
 };

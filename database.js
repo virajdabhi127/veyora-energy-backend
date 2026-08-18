@@ -99,6 +99,7 @@ async function initializeDatabase() {
         CREATE TABLE IF NOT EXISTS device_channels (
             id SERIAL PRIMARY KEY,
             device_id TEXT NOT NULL,
+            product_code TEXT NOT NULL,
             channel_id INTEGER NOT NULL,
             channel_name TEXT NOT NULL,
             UNIQUE(device_id, channel_id),
@@ -249,6 +250,7 @@ function assignDevice(deviceId, userId, productCode, channelCount, callback) {
                         (
                             device_id,
                             channel_id,
+                            product_code,~
                             channel_name
                         )
                         VALUES ($1, $2, $3)
@@ -635,7 +637,6 @@ function updateUser(userid, username, password, role, callback) {
             if (err) {
                 return callback(err);
             }
-
             db.query(
                 `UPDATE users
                  SET username = $1,
@@ -768,7 +769,6 @@ function getMonthlyEnergy(deviceId, callback) {
                 ),
                 0
             ) AS current_month,
-
             COALESCE(
                 MAX(
                     CASE
@@ -784,7 +784,6 @@ function getMonthlyEnergy(deviceId, callback) {
                 ),
                 0
             ) AS previous_month
-
         FROM energy_monthly_history
         WHERE device_id = $1
           AND history_month >= (
@@ -802,15 +801,6 @@ function getMonthlyEnergy(deviceId, callback) {
         const row = result.rows[0];
         const currentMonth = Number(row.current_month);
         const previousMonth = Number(row.previous_month);
-        /*
-         * Today's energy
-         *
-         * Current month-to-date consumption
-         * minus previous month's stored cumulative value
-         * is NOT used here.
-         *
-         * We get today's value from daily history.
-         */
         const dailyQuery = `
             SELECT
                 COALESCE(
@@ -855,6 +845,7 @@ function getMonthlyEnergy(deviceId, callback) {
 function getDeviceChannels(deviceId, callback) {
     const query = `
         SELECT
+            product_code,
             channel_id,
             channel_name
         FROM device_channels
@@ -1064,12 +1055,6 @@ function finalizeAndCleanupDailyLoad(deviceId, historyDate, callback) {
                             return;
                         }
                         const lastReading = readingResult.rows[0].recorded_at;
-                        console.log(
-                            `Daily load verified for ${deviceId} on ${historyDate}.`
-                        );
-                        console.log(
-                            `Final recorded load reading: ${lastReading}`
-                        );
                         // Everything is valid → delete old temporary data
                         const deleteQuery = `
                             DELETE FROM load_history
@@ -1091,9 +1076,6 @@ function finalizeAndCleanupDailyLoad(deviceId, historyDate, callback) {
                                     if (callback) callback(err);
                                     return;
                                 }
-                                console.log(
-                                    `Deleted ${deleteResult.rowCount} load history records for ${deviceId} on ${historyDate}.`
-                                );
                                 if (callback) {
                                     callback(null, deleteResult);
                                 }
