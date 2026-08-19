@@ -5,7 +5,6 @@ const config = require("./config");
 const deviceService = require("./services/deviceService");
 
 function initializeSocket(server, mqtt) {
-
     const io = new Server(server, {
         cors: {
             origin: [
@@ -25,11 +24,9 @@ function initializeSocket(server, mqtt) {
         }
         const cookies = parse(rawCookie);
         const token = cookies.token;
-
         if (!token) {
             return next(new Error("Authentication required"));
         }
-
         jwt.verify(token, config.jwt.secret, (err, decoded) => {
             if (err) {
                 return next(new Error("Invalid token"));
@@ -47,17 +44,17 @@ function initializeSocket(server, mqtt) {
     });
 
     io.on("connection", (socket) => {
-    socket.on("selectDevice", (deviceId) => {
-        if (!socket.devices.includes(deviceId)) {
-            return;
-        }
-        socket.selectedDevice = deviceId;
-        const device = mqtt.latestDevices.get(deviceId);
-        if (device) {
-            socket.emit("update", device);
-        }
+        socket.on("selectDevice", (deviceId) => {
+            if (!socket.devices.includes(deviceId)) {
+                return;
+            }
+            socket.selectedDevice = deviceId;
+            const device = mqtt.latestDevices.get(deviceId);
+            if (device) {
+                socket.emit("update", device);
+            }
+        });
     });
-});
 
     mqtt.mqttEvents.on("data", (data) => {
         for (const socket of io.sockets.sockets.values()) {

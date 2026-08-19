@@ -41,7 +41,7 @@ async function initializeDatabase() {
         CREATE TABLE IF NOT EXISTS users (
             user_id SERIAL PRIMARY KEY,
             userid TEXT UNIQUE NOT NULL,
-            username TEXT UNIQUE NOT NULL,
+            username TEXT NOT NULL,
             password TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user'
         )
@@ -65,6 +65,7 @@ async function initializeDatabase() {
             id SERIAL PRIMARY KEY,
             device_id TEXT NOT NULL,
             energy_kwh REAL NOT NULL,
+            channel_energy JSONB DEFAULT '{}'::jsonb,
             recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(device_id) REFERENCES devices(device_id)
         )
@@ -132,6 +133,17 @@ async function initializeDatabase() {
             FOREIGN KEY (device_id) REFERENCES devices(device_id)
         );
     `)
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS load_history_batches (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            batch_id TEXT NOT NULL,
+            received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(device_id, batch_id),
+            FOREIGN KEY(device_id) REFERENCES devices(device_id)
+        )
+    `);
 
     await new Promise((resolve, reject) => {
         ensureAdmin(err => err ? reject(err) : resolve());
@@ -242,6 +254,7 @@ function assignDevice(deviceId, userId, productCode, channelCount, callback) {
                         channelValues.push([
                             deviceId,
                             i,
+                            productCode,
                             `Channel ${i}`
                         ]);
                     }
@@ -250,10 +263,10 @@ function assignDevice(deviceId, userId, productCode, channelCount, callback) {
                         (
                             device_id,
                             channel_id,
-                            product_code,~
+                            product_code,
                             channel_name
                         )
-                        VALUES ($1, $2, $3)
+                        VALUES ($1, $2, $3, $4)
                     `;
                     let completed = 0;
                     if (channelValues.length === 0) {
@@ -275,7 +288,6 @@ function assignDevice(deviceId, userId, productCode, channelCount, callback) {
                             }
                         );
                     });
-
                     function createEnergyHistory() {
                         db.query(
                             `INSERT INTO energy_history
@@ -342,7 +354,8 @@ function getAllEnergyHistory(callback) {
     db.query(
         `SELECT
             device_id AS "deviceId",
-            energy_kwh AS "energyKWh"
+            energy_kwh AS "energyKWh",
+            channel_energy AS "channelEnergy"
          FROM energy_history`,
         (err, result) => {
             callback(err, result?.rows);
@@ -495,35 +508,57 @@ function updateDevice(deviceId, status, callback = null) {
     );
 }
 
-function saveEnergyHistory(deviceId, energyKWh) {
+function saveEnergyHistory(deviceId, energyKWh, channels) {
+    const channelEnergy = {};
+    if (Array.isArray(channels)) {
+        channels.forEach(channel => {
+            const channelId = Number(channel.channelId);
+            if (channelId > 0) {
+                channelEnergy[channelId] = Number(channel.energyKWh) || 0;
+            }
+        });
+    }
     db.query(
         `UPDATE energy_history
          SET energy_kwh = $1,
+             channel_energy = $2::jsonb,
              recorded_at = CURRENT_TIMESTAMP
-         WHERE device_id = $2`,
-        [energyKWh, deviceId],
+         WHERE device_id = $3`,
+        [
+            Number(energyKWh) || 0,
+            JSON.stringify(channelEnergy),
+            deviceId
+        ],
         (err) => {
             if (err) {
-                console.error("Energy update error:", err.message);
+                console.error(
+                    "Energy update error:",
+                    err.message
+                );
                 return;
             }
-            saveDailyHistory(deviceId, energyKWh, (dailyErr) => {
-                if (dailyErr) {
-                    console.error(
-                        "Daily history update error:",
-                        dailyErr.message
-                    );
-                    return;
-                }
-                saveMonthlyHistory(deviceId, (monthlyErr) => {
-                    if (monthlyErr) {
+            saveDailyHistory(
+                deviceId,
+                energyKWh,
+                (dailyErr) => {
+                    if (dailyErr) {
                         console.error(
-                            "Monthly history update error:",
-                            monthlyErr.message
+                            "Daily history update error:",
+                            dailyErr.message
                         );
+                        return;
                     }
-                });
-            });
+                    saveMonthlyHistory(deviceId, (monthlyErr) => {
+                            if (monthlyErr) {
+                                console.error(
+                                    "Monthly history update error:",
+                                    monthlyErr.message
+                                );
+                            }
+                        }
+                    );
+                }
+            );
         }
     );
 }
@@ -572,10 +607,6 @@ function updateDeviceInfo(deviceId, payloadVersion, channelCount, callback = nul
             }
             if (result.rowCount === 0) {
                 console.warn(`No device found with ID: ${deviceId}`);
-            } else {
-                console.log(
-                    `Device ${deviceId} updated (Payload V${payloadVersion}, Channels ${channelCount})`
-                );
             }
             if (callback) callback(null);
         }
@@ -666,34 +697,85 @@ function deleteDevice(deviceId, callback) {
     db.query("BEGIN", (err) => {
         if (err) return callback(err);
         db.query(
-            "DELETE FROM energy_history WHERE device_id = $1",
+            "DELETE FROM device_channels WHERE device_id = $1",
             [deviceId],
             (err) => {
                 if (err) {
-                    return db.query("ROLLBACK", () => callback(err));
+                    return db.query(
+                        "ROLLBACK",
+                        () => callback(err)
+                    );
                 }
                 db.query(
-                    "DELETE FROM energy_daily_history WHERE device_id = $1",
+                    "DELETE FROM energy_history WHERE device_id = $1",
                     [deviceId],
                     (err) => {
                         if (err) {
-                            return db.query("ROLLBACK", () => callback(err));
+                            return db.query(
+                                "ROLLBACK",
+                                () => callback(err)
+                            );
                         }
                         db.query(
-                            "DELETE FROM energy_monthly_history WHERE device_id = $1",
+                            "DELETE FROM energy_daily_history WHERE device_id = $1",
                             [deviceId],
                             (err) => {
                                 if (err) {
-                                    return db.query("ROLLBACK", () => callback(err));
+                                    return db.query(
+                                        "ROLLBACK",
+                                        () => callback(err)
+                                    );
                                 }
                                 db.query(
-                                    "DELETE FROM devices WHERE device_id = $1",
+                                    "DELETE FROM energy_monthly_history WHERE device_id = $1",
                                     [deviceId],
                                     (err) => {
                                         if (err) {
-                                            return db.query("ROLLBACK", () => callback(err));
+                                            return db.query(
+                                                "ROLLBACK",
+                                                () => callback(err)
+                                            );
                                         }
-                                        db.query("COMMIT", callback);
+                                        db.query(
+                                            "DELETE FROM load_history WHERE device_id = $1",
+                                            [deviceId],
+                                            (err) => {
+                                                if (err) {
+                                                    return db.query(
+                                                        "ROLLBACK",
+                                                        () => callback(err)
+                                                    );
+                                                }
+                                                db.query(
+                                                    "DELETE FROM load_daily_history WHERE device_id = $1",
+                                                    [deviceId],
+                                                    (err) => {
+                                                        if (err) {
+                                                            return db.query(
+                                                                "ROLLBACK",
+                                                                () => callback(err)
+                                                            );
+                                                        }
+                                                        db.query(
+                                                            "DELETE FROM devices WHERE device_id = $1",
+                                                            [deviceId],
+                                                            (err) => {
+                                                                if (err) {
+                                                                    return db.query(
+                                                                        "ROLLBACK",
+                                                                        () => callback(err)
+                                                                    );
+                                                                }
+                                                                db.query(
+                                                                    "COMMIT",
+                                                                    callback
+                                                                );
+                                                            }
+                                                        );
+                                                    }
+                                                );
+                                            }
+                                        );
                                     }
                                 );
                             }
@@ -894,15 +976,107 @@ function calculatePGVCLTodayCost(monthlyEnergy, todayEnergy) {
     return Number((currentCost - previousCost).toFixed(2));
 }
 
-function saveLoadHistory(deviceId, realPower, callback) {
+function saveLoadHistory(deviceId, realPower, recordedAt, callback) {
     const query = `
-        INSERT INTO load_history (device_id, real_power, recorded_at)
-        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        INSERT INTO load_history
+        (device_id, real_power, recorded_at)
+        VALUES ($1, $2, $3)
     `;
-    db.query(query, [deviceId, realPower], (err, result) => {
-        if (callback) {
-            callback(err, result);
+    db.query(
+        query,
+        [deviceId, realPower, recordedAt],
+        (err, result) => {
+            if (callback) {
+                callback(err, result);
+            }
         }
+    );
+}
+
+function saveLoadHistoryBatch(deviceId, batchId, samples, callback) {
+    db.query("BEGIN", (err) => {
+        if (err) {
+            return callback(err);
+        }
+        db.query(
+            `
+            INSERT INTO load_history_batches
+            (device_id, batch_id)
+            VALUES ($1, $2)
+            ON CONFLICT (device_id, batch_id)
+            DO NOTHING
+            RETURNING id
+            `,
+            [deviceId, batchId],
+            (err, result) => {
+                if (err) {
+                    return db.query(
+                        "ROLLBACK",
+                        () => callback(err)
+                    );
+                }
+                if (result.rows.length === 0) {
+                    return db.query(
+                        "COMMIT",
+                        (err) => {
+                            if (err) {
+                                return db.query(
+                                    "ROLLBACK",
+                                    () => callback(err)
+                                );
+                            }
+                            callback(null, true);
+                        }
+                    );
+                }
+                let index = 0;
+                function insertNext() {
+                    if (index >= samples.length) {
+                        return db.query(
+                            "COMMIT",
+                            (err) => {
+                                if (err) {
+                                    return db.query(
+                                        "ROLLBACK",
+                                        () => callback(err)
+                                    );
+                                }
+                                callback(null, false);
+                            }
+                        );
+                    }
+                    const sample = samples[index];
+                    const recordedAt = new Date(sample.timestamp * 1000);
+                    db.query(
+                        `
+                        INSERT INTO load_history
+                        (
+                            device_id,
+                            real_power,
+                            recorded_at
+                        )
+                        VALUES ($1, $2, $3)
+                        `,
+                        [
+                            deviceId,
+                            Number(sample.kw) * 1000,
+                            recordedAt
+                        ],
+                        (err) => {
+                            if (err) {
+                                return db.query(
+                                    "ROLLBACK",
+                                    () => callback(err)
+                                );
+                            }
+                            index++;
+                            insertNext();
+                        }
+                    );
+                }
+                insertNext();
+            }
+        );
     });
 }
 
@@ -1233,6 +1407,7 @@ module.exports = {
     getDeviceChannels,
     renameDeviceChannel,
     saveLoadHistory,
+    saveLoadHistoryBatch,
     calculateDailyLoad,
     finalizeAndCleanupDailyLoad,
     verifyDailyLoad,

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const database = require("../database");
+const mqtt = require("../mqtt");
 const authenticate = require("../middleware/auth");
 const requireAdmin = require("../middleware/admin");
 
@@ -190,18 +191,61 @@ router.put("/device/:deviceId", (req, res) => {
 
 router.delete("/device/:deviceId", (req, res) => {
     const deviceId = req.params.deviceId;
-    database.deleteDevice(deviceId, (err) => {
-        if (err) {
-            return res.status(500).json({
-                success: false,
-                message: "Database error."
-            });
-        }
-        res.json({
-            success: true,
-            message: "Device deleted successfully."
+    if (!deviceId || deviceId.trim().length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid device ID."
         });
-    });
+    }
+    database.getDevice(
+        deviceId,
+        (err, device) => {
+            if (err) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Database error."
+                });
+            }
+            if (!device) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Device not found."
+                });
+            }
+            database.deleteDevice(
+                deviceId,
+                (err) => {
+                    if (err) {
+                        console.error(
+                            `Failed to delete device ${deviceId}:`,
+                            err.message
+                        );
+                        return res.status(500).json({
+                            success: false,
+                            message: "Database error."
+                        });
+                    }
+                    mqtt.latestDevices.delete(deviceId);
+                    if (mqtt.pendingWiFiRequests) {
+                        mqtt.pendingWiFiRequests.delete(deviceId);
+                    }
+                    if (mqtt.lastDatabaseSave) {
+                        mqtt.lastDatabaseSave.delete(deviceId);
+                    }
+                    if (mqtt.lastLoadHistorySave) {
+                        mqtt.lastLoadHistorySave.delete(deviceId);
+                    }
+                    if (mqtt.dailyLoadFinalized) {
+                        mqtt.dailyLoadFinalized.delete(deviceId);
+                    }
+                    return res.json({
+                        success: true,
+                        message: "Device deleted successfully."
+                    });
+                }
+            );
+        }
+    );
 });
 
 router.get("/stats", (req, res) => {

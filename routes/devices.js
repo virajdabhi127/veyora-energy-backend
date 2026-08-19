@@ -190,7 +190,6 @@ router.delete("/:deviceId/wifi/:wifiId", authenticate, async (req, res) => {
                     resolve(device);
                 }
             );
-
         });
         if (!device) {
             return res.status(404).json({
@@ -227,12 +226,9 @@ router.delete("/:deviceId/wifi/:wifiId", authenticate, async (req, res) => {
 });
 
 router.post("/:deviceId/wifi", authenticate, async (req, res) => {
-
     const deviceId = req.params.deviceId;
-
     const ssid = req.body.ssid;
     const password = req.body.password;
-
     if (
         typeof ssid !== "string" ||
         ssid.trim().length === 0
@@ -242,7 +238,6 @@ router.post("/:deviceId/wifi", authenticate, async (req, res) => {
             message: "Wi-Fi name cannot be empty."
         });
     }
-
     if (
         typeof password !== "string" ||
         password.length === 0
@@ -252,50 +247,38 @@ router.post("/:deviceId/wifi", authenticate, async (req, res) => {
             message: "Wi-Fi password cannot be empty."
         });
     }
-
     if (ssid.trim().length > 32) {
         return res.status(400).json({
             success: false,
             message: "Wi-Fi name must be 32 characters or less."
         });
     }
-
     try {
-
         const device = await new Promise((resolve, reject) => {
-
             database.getDevice(
                 deviceId,
                 (err, device) => {
-
                     if (err) {
                         reject(err);
                         return;
                     }
-
                     resolve(device);
                 }
             );
-
         });
-
         if (!device) {
-
             return res.status(404).json({
                 success: false,
                 message: "Device not found."
             });
         }
-
         const result = await mqtt.addWiFi(
             deviceId,
             ssid.trim(),
             password,
             5000
         );
-
         if (!result.success) {
-
             return res.status(400).json({
                 success: false,
                 message:
@@ -303,21 +286,15 @@ router.post("/:deviceId/wifi", authenticate, async (req, res) => {
                     "Failed to add Wi-Fi network."
             });
         }
-
         return res.json({
             success: true,
-            message:
-                result.message ||
-                "Wi-Fi network added successfully."
+            message: result.message || "Wi-Fi network added successfully."
         });
-
     } catch (err) {
-
         console.error(
             `Failed to add Wi-Fi to ${deviceId}:`,
             err.message
         );
-
         return res.status(504).json({
             success: false,
             message: "Device did not respond."

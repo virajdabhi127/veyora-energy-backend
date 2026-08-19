@@ -23,7 +23,8 @@ client.on("connect", () => {
     client.subscribe(
         [
             config.mqtt.topic,
-            "energymeter/+/wifi"
+            "energymeter/+/wifi",
+            "energymeter/+/load/buffer"
         ],
         (err) => {
             if (err) {
@@ -43,6 +44,79 @@ client.on("message", (topic, message) => {
     const product = parts[0];
     const deviceId = parts[1];
     const messageType = parts[2];
+    if (messageType === "load" && parts[3] === "buffer") {
+        try {
+            const data = JSON.parse(message.toString());
+            if (
+                typeof data !== "object" ||
+                data === null ||
+                data.type !== "loadHistory" ||
+                !data.batchId ||
+                !Array.isArray(data.samples) ||
+                data.samples.length === 0
+            ) {
+                console.error(
+                    `Invalid load buffer from ${deviceId}`
+                );
+                return;
+            }
+            if (data.samples.length > 20) {
+                console.error(
+                    `Load batch too large from ${deviceId}`
+                );
+                return;
+            }
+            for (const sample of data.samples) {
+                if (
+                    typeof sample.timestamp !== "number" ||
+                    typeof sample.kw !== "number"
+                ) {
+                    console.error(
+                        `Invalid load sample in batch ${data.batchId}`
+                    );
+                    return;
+                }
+            }
+            database.saveLoadHistoryBatch(
+                deviceId,
+                data.batchId,
+                data.samples,
+                (err) => {
+                    if (err) {
+                        console.error(
+                            `Failed to save load batch ${data.batchId} from ${deviceId}:`,
+                            err.message
+                        );
+                        return;
+                    }
+                    const ackTopic = `energymeter/${deviceId}/load/ack`;
+                    const ackPayload = JSON.stringify({
+                        batchId: data.batchId,
+                        success: true
+                    });
+                    client.publish(
+                        ackTopic,
+                        ackPayload,
+                        (err) => {
+                            if (err) {
+                                console.error(
+                                    `Failed to send load ACK for ${deviceId}:`,
+                                    err.message
+                                );
+                                return;
+                            }
+                        }
+                    );
+                }
+            );
+        } catch (err) {
+            console.error(
+                `Invalid load buffer JSON from ${deviceId}:`,
+                err.message
+            );
+        }
+        return;
+    }
     if (messageType === "wifi") {
         try {
             const data = JSON.parse(
@@ -61,13 +135,11 @@ client.on("message", (topic, message) => {
                 pendingWiFiRequests.delete(deviceId);
             }
         } catch (err) {
-
             console.error(
                 `Invalid Wi-Fi JSON from ${deviceId}:`,
                 err.message
             );
         }
-
         return;
     }
     database.getDevice(deviceId, (err, device) => {
@@ -100,6 +172,7 @@ client.on("message", (topic, message) => {
                     activeWifiId: -1,
                     voltage: 0,
                     totalCurrent: 0,
+                    totalPowerFactor: 0,
                     totalRealPower: 0,
                     totalApparentPower: 0,
                     energyKWh: 0,
@@ -140,11 +213,15 @@ client.on("message", (topic, message) => {
                 : -1;
             deviceData.voltage = Number(data.voltage) || 0;
             deviceData.totalCurrent = Number(data.totalCurrent) || 0;
+            deviceData.totalPowerFactor = Number(data.totalPowerFactor) || 0;
             deviceData.channels = Array.isArray(data.channels) ? data.channels : [];
             deviceData.totalRealPower = 0;
             deviceData.totalApparentPower = 0;
             deviceData.energyKWh = Number(data.energyKWh) || 0;
             deviceData.channels.forEach(channel => {
+                channel.current = Number(channel.current) || 0;
+                channel.pf = Number(channel.pf) || 0;
+                channel.energyKWh = Number(channel.energyKWh) || 0;
                 channel.apparentPower = deviceData.voltage * channel.current;
                 channel.realPower = channel.apparentPower * channel.pf;
                 deviceData.totalApparentPower += channel.apparentPower;
@@ -157,14 +234,15 @@ client.on("message", (topic, message) => {
             // ---------------------------------------
             const lastSave = lastDatabaseSave.get(deviceId) || 0;
             if (now - lastSave >= config.saveInterval) {
-                database.saveEnergyHistory(deviceId, deviceData.energyKWh);
+                database.saveEnergyHistory(deviceId, deviceData.energyKWh, deviceData.channels);
                 lastDatabaseSave.set(deviceId, now);
             }
             const lastLoadSave = lastLoadHistorySave.get(deviceId) || 0;
             if (now - lastLoadSave >= 10000) {
                 database.saveLoadHistory(
                     deviceId,
-                    deviceData.totalRealPower
+                    deviceData.totalRealPower,
+                    new Date()
                 );
                 lastLoadHistorySave.set(deviceId, now);
                 database.calculateDailyLoad(
@@ -449,5 +527,9 @@ module.exports = {
     mqttEvents,
     deleteWiFi,
     requestWiFi,
-    addWiFi
+    addWiFi,
+    pendingWiFiRequests,
+    lastDatabaseSave,
+    lastLoadHistorySave,
+    dailyLoadFinalized
 };
