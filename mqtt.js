@@ -182,7 +182,8 @@ client.on("message", (topic, message) => {
                             current: 0,
                             pf: 0,
                             realPower: 0,
-                            apparentPower: 0
+                            apparentPower: 0,
+                            energyKWh: 0
                         }
                     ],
                     connected: true,
