@@ -15,7 +15,7 @@ const client = mqtt.connect({
     protocol: "mqtts",
     username: config.mqtt.username,
     password: config.mqtt.password,
-    reconnectPeriod: 5000
+    reconnectPeriod: 20000
 });
 
 client.on("connect", () => {
