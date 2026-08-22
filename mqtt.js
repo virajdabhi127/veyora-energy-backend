@@ -197,7 +197,11 @@ client.on("message", (topic, message) => {
             }
             deviceData.connected = true;
             const payloadVersion = Number(data.payloadVersion) || 1;
-            const channelCount = Number(data.channelCount) || 1;
+            const channelCount = Number(data.channelCount);
+            if (!Number.isFinite(channelCount) || channelCount < 0) {
+                console.error(`Invalid channelCount from ${deviceId}`);
+                return;
+            }
             if (deviceData.payloadVersion !== payloadVersion || deviceData.channelCount !== channelCount) {
                 deviceData.payloadVersion = payloadVersion;
                 deviceData.channelCount = channelCount;
