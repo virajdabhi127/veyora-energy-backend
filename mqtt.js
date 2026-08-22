@@ -232,12 +232,19 @@ client.on("message", (topic, message) => {
             deviceData.lastSeen = now;
             deviceData.lastUpdate = new Date(now).toISOString();
             finalizePreviousDayLoad(deviceId);
-            // ---------------------------------------
             const lastSave = lastDatabaseSave.get(deviceId) || 0;
             if (now - lastSave >= config.saveInterval) {
-                database.saveEnergyHistory(deviceId, deviceData.energyKWh, deviceData.channels);
+                database.saveEnergyHistory(
+                    deviceId,
+                    deviceData.energyKWh,
+                    deviceData.channels
+                );
                 lastDatabaseSave.set(deviceId, now);
             }
+            database.saveDailyHistory(
+                deviceId,
+                deviceData.energyKWh
+            );
             const lastLoadSave = lastLoadHistorySave.get(deviceId) || 0;
             if (now - lastLoadSave >= 10000) {
                 database.saveLoadHistory(

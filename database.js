@@ -451,7 +451,6 @@ function saveDailyHistory(deviceId, energyKWh, callback) {
                     "Daily history initialization error:",
                     err.message
                 );
-
                 if (callback) callback(err);
                 return;
             }
