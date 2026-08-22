@@ -512,8 +512,10 @@ function saveEnergyHistory(deviceId, energyKWh, channels) {
     if (Array.isArray(channels)) {
         channels.forEach(channel => {
             const channelId = Number(channel.channelId);
+
             if (channelId > 0) {
-                channelEnergy[channelId] = Number(channel.energyKWh) || 0;
+                channelEnergy[channelId] =
+                    Number(channel.energyKWh) || 0;
             }
         });
     }
@@ -536,28 +538,14 @@ function saveEnergyHistory(deviceId, energyKWh, channels) {
                 );
                 return;
             }
-            saveDailyHistory(
-                deviceId,
-                energyKWh,
-                (dailyErr) => {
-                    if (dailyErr) {
-                        console.error(
-                            "Daily history update error:",
-                            dailyErr.message
-                        );
-                        return;
-                    }
-                    saveMonthlyHistory(deviceId, (monthlyErr) => {
-                            if (monthlyErr) {
-                                console.error(
-                                    "Monthly history update error:",
-                                    monthlyErr.message
-                                );
-                            }
-                        }
+            saveMonthlyHistory(deviceId, (monthlyErr) => {
+                if (monthlyErr) {
+                    console.error(
+                        "Monthly history update error:",
+                        monthlyErr.message
                     );
                 }
-            );
+            });
         }
     );
 }

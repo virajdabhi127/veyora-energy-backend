@@ -176,16 +176,7 @@ client.on("message", (topic, message) => {
                     totalRealPower: 0,
                     totalApparentPower: 0,
                     energyKWh: 0,
-                    channels: [
-                        {
-                            channelId: 1,
-                            current: 0,
-                            pf: 0,
-                            realPower: 0,
-                            apparentPower: 0,
-                            energyKWh: 0
-                        }
-                    ],
+                    channels: [],
                     connected: true,
                     lastUpdate: "--:--:--",
                     lastSeen: 0
@@ -219,19 +210,30 @@ client.on("message", (topic, message) => {
             deviceData.voltage = Number(data.voltage) || 0;
             deviceData.totalCurrent = Number(data.totalCurrent) || 0;
             deviceData.totalPowerFactor = Number(data.totalPowerFactor) || 0;
-            deviceData.channels = Array.isArray(data.channels) ? data.channels : [];
+            deviceData.channels = Array.isArray(data.channels)
+                ? data.channels
+                : [];
+            deviceData.energyKWh = Number(data.energyKWh) || 0;
             deviceData.totalRealPower = 0;
             deviceData.totalApparentPower = 0;
-            deviceData.energyKWh = Number(data.energyKWh) || 0;
-            deviceData.channels.forEach(channel => {
-                channel.current = Number(channel.current) || 0;
-                channel.pf = Number(channel.pf) || 0;
-                channel.energyKWh = Number(channel.energyKWh) || 0;
-                channel.apparentPower = deviceData.voltage * channel.current;
-                channel.realPower = channel.apparentPower * channel.pf;
-                deviceData.totalApparentPower += channel.apparentPower;
-                deviceData.totalRealPower += channel.realPower;
-            });
+            if (deviceData.channelCount === 0) {
+                const voltage = deviceData.voltage;
+                const current = deviceData.totalCurrent;
+                const pf = deviceData.totalPowerFactor;
+                deviceData.totalApparentPower = voltage * current;
+                deviceData.totalRealPower = deviceData.totalApparentPower * pf;
+
+            } else {
+                deviceData.channels.forEach(channel => {
+                    channel.current = Number(channel.current) || 0;
+                    channel.pf = Number(channel.pf) || 0;
+                    channel.energyKWh = Number(channel.energyKWh) || 0;
+                    channel.apparentPower = deviceData.voltage * channel.current;
+                    channel.realPower = channel.apparentPower * channel.pf;
+                    deviceData.totalApparentPower += channel.apparentPower;
+                    deviceData.totalRealPower += channel.realPower;
+                });
+            }
             const now = Date.now();
             deviceData.lastSeen = now;
             deviceData.lastUpdate = new Date(now).toISOString();
