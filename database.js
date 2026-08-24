@@ -512,7 +512,6 @@ function saveEnergyHistory(deviceId, energyKWh, channels) {
     if (Array.isArray(channels)) {
         channels.forEach(channel => {
             const channelId = Number(channel.channelId);
-
             if (channelId > 0) {
                 channelEnergy[channelId] =
                     Number(channel.energyKWh) || 0;
@@ -538,14 +537,30 @@ function saveEnergyHistory(deviceId, energyKWh, channels) {
                 );
                 return;
             }
-            saveMonthlyHistory(deviceId, (monthlyErr) => {
-                if (monthlyErr) {
-                    console.error(
-                        "Monthly history update error:",
-                        monthlyErr.message
+            saveDailyHistory(
+                deviceId,
+                energyKWh,
+                (dailyErr) => {
+                    if (dailyErr) {
+                        console.error(
+                            "Daily history update error:",
+                            dailyErr.message
+                        );
+                        return;
+                    }
+                    saveMonthlyHistory(
+                        deviceId,
+                        (monthlyErr) => {
+                            if (monthlyErr) {
+                                console.error(
+                                    "Monthly history update error:",
+                                    monthlyErr.message
+                                );
+                            }
+                        }
                     );
                 }
-            });
+            );
         }
     );
 }
@@ -1099,7 +1114,16 @@ function saveLoadHistoryBatch(deviceId, batchId, samples, callback) {
                         );
                     }
                     const sample = samples[index];
-                    const recordedAt = new Date(sample.timestamp * 1000);
+                    if (sample.synced === false) {
+                        index++;
+                        return insertNext();
+                    }
+                    const recordedAt = new Date(sample.ts * 1000);
+                    const MIN_VALID_EPOCH = 1704067200;
+                    if (sample.ts < MIN_VALID_EPOCH) {
+                        index++;
+                        return insertNext();
+                    }
                     db.query(
                         `
                         INSERT INTO load_history

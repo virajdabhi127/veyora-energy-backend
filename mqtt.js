@@ -55,25 +55,16 @@ client.on("message", (topic, message) => {
                 !Array.isArray(data.samples) ||
                 data.samples.length === 0
             ) {
-                console.error(
-                    `Invalid load buffer from ${deviceId}`
-                );
+                console.error(`Invalid load buffer from ${deviceId}`);
                 return;
             }
             if (data.samples.length > 20) {
-                console.error(
-                    `Load batch too large from ${deviceId}`
-                );
+                console.error(`Load batch too large from ${deviceId}`);
                 return;
             }
             for (const sample of data.samples) {
-                if (
-                    typeof sample.timestamp !== "number" ||
-                    typeof sample.kw !== "number"
-                ) {
-                    console.error(
-                        `Invalid load sample in batch ${data.batchId}`
-                    );
+                if (typeof sample.ts !== "number" || typeof sample.kw !== "number") {
+                    console.error(`Invalid load sample in batch ${data.batchId}`);
                     return;
                 }
             }
@@ -94,26 +85,19 @@ client.on("message", (topic, message) => {
                         batchId: data.batchId,
                         success: true
                     });
-                    client.publish(
-                        ackTopic,
-                        ackPayload,
-                        (err) => {
-                            if (err) {
-                                console.error(
-                                    `Failed to send load ACK for ${deviceId}:`,
-                                    err.message
-                                );
-                                return;
-                            }
+                    client.publish(ackTopic, ackPayload, (err) => {
+                        if (err) {
+                            console.error(
+                                `Failed to send load ACK for ${deviceId}:`,
+                                err.message
+                            );
+                            return;
                         }
-                    );
+                    });
                 }
             );
         } catch (err) {
-            console.error(
-                `Invalid load buffer JSON from ${deviceId}:`,
-                err.message
-            );
+            console.error(`Invalid load buffer JSON from ${deviceId}:`, err.message);
         }
         return;
     }
