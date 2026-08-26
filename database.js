@@ -430,58 +430,59 @@ function saveMonthlyHistory(deviceId, callback) {
 
 function saveDailyHistory(deviceId, energyKWh, callback) {
     const historyDate = getISTDate();
-    const insertQuery = `
-        INSERT INTO energy_daily_history
-        (
-            device_id,
-            history_date,
-            energy_kwh,
-            start_energy_kwh
-        )
-        VALUES ($1, $2, 0, $3)
-        ON CONFLICT (device_id, history_date)
-        DO NOTHING
+    const baselineQuery = `
+        SELECT (start_energy_kwh + energy_kwh) AS end_energy_kwh
+        FROM energy_daily_history
+        WHERE device_id = $1
+          AND history_date < $2
+        ORDER BY history_date DESC
+        LIMIT 1
     `;
-    db.query(
-        insertQuery,
-        [deviceId, historyDate, energyKWh],
-        (err) => {
-            if (err) {
-                console.error(
-                    "Daily history initialization error:",
-                    err.message
-                );
-                if (callback) callback(err);
-                return;
-            }
-            const updateQuery = `
-                UPDATE energy_daily_history
-                SET
-                    energy_kwh = GREATEST(
-                        $3 - start_energy_kwh,
-                        0
-                    ),
-                    created_at = CURRENT_TIMESTAMP
-                WHERE device_id = $1
-                  AND history_date = $2
-            `;
-            db.query(
-                updateQuery,
-                [deviceId, historyDate, energyKWh],
-                (err) => {
-                    if (err) {
-                        console.error(
-                            "Daily history update error:",
-                            err.message
-                        );
-                    }
-                    if (callback) {
-                        callback(err);
-                    }
-                }
-            );
+    db.query(baselineQuery, [deviceId, historyDate], (err, result) => {
+        if (err) {
+            console.error("Daily history baseline lookup error:", err.message);
+            if (callback) callback(err);
+            return;
         }
-    );
+        const startBaseline = result.rows.length > 0
+            ? Number(result.rows[0].end_energy_kwh)
+            : energyKWh;
+
+        const insertQuery = `
+            INSERT INTO energy_daily_history
+            (device_id, history_date, energy_kwh, start_energy_kwh)
+            VALUES ($1, $2, GREATEST($3 - $4, 0), $4)
+            ON CONFLICT (device_id, history_date) DO NOTHING
+        `;
+        db.query(
+            insertQuery,
+            [deviceId, historyDate, energyKWh, startBaseline],
+            (err) => {
+                if (err) {
+                    console.error("Daily history initialization error:", err.message);
+                    if (callback) callback(err);
+                    return;
+                }
+                const updateQuery = `
+                    UPDATE energy_daily_history
+                    SET energy_kwh = GREATEST($3 - start_energy_kwh, 0),
+                        created_at = CURRENT_TIMESTAMP
+                    WHERE device_id = $1
+                      AND history_date = $2
+                `;
+                db.query(
+                    updateQuery,
+                    [deviceId, historyDate, energyKWh],
+                    (err) => {
+                        if (err) {
+                            console.error("Daily history update error:", err.message);
+                        }
+                        if (callback) callback(err);
+                    }
+                );
+            }
+        );
+    });
 }
 
 function getUser(userid, callback) {
