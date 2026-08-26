@@ -447,11 +447,10 @@ function saveDailyHistory(deviceId, energyKWh, callback) {
         const startBaseline = result.rows.length > 0
             ? Number(result.rows[0].end_energy_kwh)
             : energyKWh;
-
         const insertQuery = `
             INSERT INTO energy_daily_history
             (device_id, history_date, energy_kwh, start_energy_kwh)
-            VALUES ($1, $2, GREATEST($3 - $4, 0), $4)
+            VALUES ($1, $2, GREATEST($3::real - $4::real, 0), $4::real)
             ON CONFLICT (device_id, history_date) DO NOTHING
         `;
         db.query(
