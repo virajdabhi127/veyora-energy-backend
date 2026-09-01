@@ -34,7 +34,37 @@ app.use("/auth", authRoutes);
 app.use("/admin", adminRoutes);
 app.use("/devices", deviceRoutes);
 
+function checkDailyHistoryRollover() {
+    database.getAllDevices((err, devices) => {
+        if (err) {
+            console.error(
+                "Failed to get devices for daily history rollover:",
+                err.message
+            );
+            return;
+        }
+        if (!devices || devices.length === 0) {
+            return;
+        }
+        devices.forEach(device => {
+            database.ensureDailyHistoryRow(
+                device.deviceId,
+                (err) => {
+                    if (err) {
+                        console.error(
+                            `Daily history rollover failed for ${device.deviceId}:`,
+                            err.message
+                        );
+                    }
+                }
+            );
+        });
+    });
+}
+
 database.init(() => {
+    checkDailyHistoryRollover();
+    setInterval(checkDailyHistoryRollover, 10 * 60 * 1000);
     server.listen(config.server.port, () => {
         console.log("SERVER_STARTED");
     });
