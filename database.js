@@ -355,7 +355,8 @@ function getAllEnergyHistory(callback) {
         `SELECT
             device_id AS "deviceId",
             energy_kwh AS "energyKWh",
-            channel_energy AS "channelEnergy"
+            channel_energy AS "channelEnergy",
+            recorded_at AS "recordedAt"
          FROM energy_history`,
         (err, result) => {
             callback(err, result?.rows);

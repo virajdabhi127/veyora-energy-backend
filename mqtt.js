@@ -64,7 +64,7 @@ database.getAllEnergyHistory((err, rows) => {
                 energyKWh: Number(kwh) || 0
             })),
             connected: false,
-            lastUpdate: null,
+            lastUpdate: row.recordedAt,
             lastSeen: 0
         });
     });
