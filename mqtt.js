@@ -8,6 +8,7 @@ const latestDevices = new Map();
 const lastLoadHistorySave = new Map();
 const dailyLoadFinalized = new Map();
 const pendingWiFiRequests = new Map();
+let dailyRowsEnsuredDate = null;
 
 const client = mqtt.connect({
     host: config.mqtt.host,
@@ -63,10 +64,11 @@ database.getAllEnergyHistory((err, rows) => {
                 energyKWh: Number(kwh) || 0
             })),
             connected: false,
-            lastUpdate: "--:--:--",
+            lastUpdate: null,
             lastSeen: 0
         });
     });
+    ensureDailyRowsForAllDevices();
 });
 
 client.on("error", (err) => {
@@ -553,6 +555,27 @@ function addWiFi(deviceId, ssid, password, timeout = 5000) {
         );
     });
 }
+
+function ensureDailyRowsForAllDevices() {
+    const today = getISTDateString();
+    if (dailyRowsEnsuredDate === today) return;
+    for (const deviceData of latestDevices.values()) {
+        database.saveDailyHistory(
+            deviceData.deviceId,
+            deviceData.energyKWh,
+            (err) => {
+                if (err) {
+                    console.error(
+                        `Failed to ensure daily row for ${deviceData.deviceId}:`,
+                        err.message
+                    );
+                }
+            }
+        );
+    }
+    dailyRowsEnsuredDate = today;
+}
+setInterval(ensureDailyRowsForAllDevices, 60 * 1000);
 
 module.exports = {
     latestDevices,
