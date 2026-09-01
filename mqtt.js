@@ -35,6 +35,40 @@ client.on("connect", () => {
     );
 });
 
+database.getAllEnergyHistory((err, rows) => {
+    if (err) {
+        console.error("Failed to hydrate latestDevices:", err.message);
+        return;
+    }
+    rows.forEach(row => {
+        const channelEnergy = row.channelEnergy || {};
+        latestDevices.set(row.deviceId, {
+            deviceId: row.deviceId,
+            product: null,
+            payloadVersion: 0,
+            channelCount: Object.keys(channelEnergy).length,
+            activeWifiId: -1,
+            voltage: 0,
+            totalCurrent: 0,
+            totalPowerFactor: 0,
+            totalRealPower: 0,
+            totalApparentPower: 0,
+            energyKWh: Number(row.energyKWh) || 0,
+            channels: Object.entries(channelEnergy).map(([channelId, kwh]) => ({
+                channelId: Number(channelId),
+                current: 0,
+                pf: 0,
+                realPower: 0,
+                apparentPower: 0,
+                energyKWh: Number(kwh) || 0
+            })),
+            connected: false,
+            lastUpdate: "--:--:--",
+            lastSeen: 0
+        });
+    });
+});
+
 client.on("error", (err) => {
     console.error("MQTT Error:", err);
 });
