@@ -600,7 +600,8 @@ function updateDeviceInfo(deviceId, payloadVersion, channelCount, callback = nul
         `UPDATE devices
          SET payload_version = $1,
              channel_count = $2
-         WHERE device_id = $3`,
+         WHERE device_id = $3
+         RETURNING product_code`,
         [payloadVersion, channelCount, deviceId],
         (err, result) => {
             if (err) {
@@ -610,8 +611,38 @@ function updateDeviceInfo(deviceId, payloadVersion, channelCount, callback = nul
             }
             if (result.rowCount === 0) {
                 console.warn(`No device found with ID: ${deviceId}`);
+                if (callback) callback(null);
+                return;
             }
-            if (callback) callback(null);
+            const productCode = result.rows[0].product_code;
+            if (channelCount <= 0) {
+                if (callback) callback(null);
+                return;
+            }
+            const channelQuery = `
+                INSERT INTO device_channels
+                (device_id, channel_id, product_code, channel_name)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (device_id, channel_id) DO NOTHING
+            `;
+            let completed = 0;
+            let queryError = null;
+            for (let i = 1; i <= channelCount; i++) {
+                db.query(
+                    channelQuery,
+                    [deviceId, i, productCode, `Channel ${i}`],
+                    (err) => {
+                        if (err) {
+                            console.error("Channel sync error:", err.message);
+                            queryError = err;
+                        }
+                        completed++;
+                        if (completed === channelCount && callback) {
+                            callback(queryError);
+                        }
+                    }
+                );
+            }
         }
     );
 }
