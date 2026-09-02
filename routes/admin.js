@@ -107,6 +107,53 @@ router.get("/devices", (req, res) => {
     });
 });
 
+router.post("/device/:deviceId/set-energy", (req, res) => {
+    const deviceId = req.params.deviceId;
+    const { energyKWh } = req.body;
+    const value = Number(energyKWh);
+    if (!Number.isFinite(value) || value < 0) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid energy value."
+        });
+    }
+    database.getDevice(deviceId, (err, device) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: "Database error."
+            });
+        }
+        if (!device) {
+            return res.status(404).json({
+                success: false,
+                message: "Device not found."
+            });
+        }
+        const deviceData = mqtt.latestDevices.get(deviceId);
+        if (!deviceData || !deviceData.connected) {
+            return res.status(409).json({
+                success: false,
+                message: "Device is offline. Cannot send energy update."
+            });
+        }
+        mqtt.setEnergy(deviceId, value)
+            .then(() => {
+                res.json({
+                    success: true,
+                    message: "Energy update sent to device."
+                });
+            })
+            .catch((err) => {
+                console.error("Set energy error:", err.message);
+                res.status(500).json({
+                    success: false,
+                    message: "Failed to send energy update."
+                });
+            });
+    });
+});
+
 router.post("/assign-device", (req, res) => {
     const {
         deviceId,

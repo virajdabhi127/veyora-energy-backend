@@ -554,6 +554,23 @@ function addWiFi(deviceId, ssid, password, timeout = 5000) {
     });
 }
 
+function setEnergy(deviceId, energyKWh) {
+    return new Promise((resolve, reject) => {
+        const topic = `energymeter/${deviceId}/command`;
+        const payload = JSON.stringify({
+            action: "set_energy",
+            energyKWh: Number(energyKWh)
+        });
+        client.publish(topic, payload, (err) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+            resolve();
+        });
+    });
+}
+
 function ensureDailyRowsForAllDevices() {
     const today = getISTDateString();
     if (dailyRowsEnsuredDate === today) return;
@@ -581,6 +598,7 @@ module.exports = {
     deleteWiFi,
     requestWiFi,
     addWiFi,
+    setEnergy,
     pendingWiFiRequests,
     lastDatabaseSave,
     lastLoadHistorySave,
