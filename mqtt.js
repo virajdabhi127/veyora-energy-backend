@@ -98,16 +98,23 @@ client.on("message", (topic, message) => {
                 console.error(`Load batch too large from ${deviceId}`);
                 return;
             }
-            for (const sample of data.samples) {
-                if (typeof sample.ts !== "number" || typeof sample.kw !== "number") {
-                    console.error(`Invalid load sample in batch ${data.batchId}`);
-                    return;
-                }
+            const validSamples = data.samples.filter(sample =>
+                typeof sample.ts === "number" &&
+                typeof sample.kw === "number" &&
+                Number.isFinite(sample.ts) &&
+                Number.isFinite(sample.kw)
+            );
+            if (validSamples.length === 0) {
+                console.error(`All samples invalid in batch ${data.batchId} from ${deviceId}`);
+                return;
+            }
+            if (validSamples.length < data.samples.length) {
+                console.warn(`Dropped ${data.samples.length - validSamples.length} invalid sample(s) in batch ${data.batchId} from ${deviceId}`);
             }
             database.saveLoadHistoryBatch(
                 deviceId,
                 data.batchId,
-                data.samples,
+                validSamples,
                 (err) => {
                     if (err) {
                         console.error(
