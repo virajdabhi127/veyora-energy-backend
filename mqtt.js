@@ -241,24 +241,15 @@ client.on("message", (topic, message) => {
                 ? data.channels
                 : [];
             deviceData.energyKWh = Number(data.energyKWh) || 0;
-            deviceData.totalRealPower = 0;
-            deviceData.totalApparentPower = 0;
-            if (deviceData.channelCount === 0) {
-                const voltage = deviceData.voltage;
-                const current = deviceData.totalCurrent;
-                const pf = deviceData.totalPowerFactor;
-                deviceData.totalApparentPower = voltage * current;
-                deviceData.totalRealPower = deviceData.totalApparentPower * pf;
-
-            } else {
+            deviceData.totalApparentPower = deviceData.voltage * deviceData.totalCurrent;
+            deviceData.totalRealPower = deviceData.totalApparentPower * deviceData.totalPowerFactor;
+            if (deviceData.channelCount > 0) {
                 deviceData.channels.forEach(channel => {
                     channel.current = Number(channel.current) || 0;
                     channel.pf = Number(channel.pf) || 0;
                     channel.energyKWh = Number(channel.energyKWh) || 0;
                     channel.apparentPower = deviceData.voltage * channel.current;
                     channel.realPower = channel.apparentPower * channel.pf;
-                    deviceData.totalApparentPower += channel.apparentPower;
-                    deviceData.totalRealPower += channel.realPower;
                 });
             }
             const now = Date.now();
