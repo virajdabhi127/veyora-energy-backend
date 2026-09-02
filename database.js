@@ -729,8 +729,15 @@ function updateUser(userid, username, password, role, callback) {
 }
 
 function updatedevice(deviceId, userId, productCode, channelCount, callback) {
+    let settled = false;
+    function done(err, result) {
+        if (settled) return;
+        settled = true;
+        callback(err, result);
+    }
+
     db.query("BEGIN", (err) => {
-        if (err) return callback(err);
+        if (err) return done(err);
         db.query(
             `UPDATE devices
              SET user_id = $1,
@@ -740,10 +747,7 @@ function updatedevice(deviceId, userId, productCode, channelCount, callback) {
             [userId, productCode, channelCount, deviceId],
             (err, result) => {
                 if (err) {
-                    return db.query(
-                        "ROLLBACK",
-                        () => callback(err)
-                    );
+                    return db.query("ROLLBACK", () => done(err));
                 }
                 db.query(
                     `DELETE FROM device_channels
@@ -751,10 +755,7 @@ function updatedevice(deviceId, userId, productCode, channelCount, callback) {
                     [deviceId],
                     (err) => {
                         if (err) {
-                            return db.query(
-                                "ROLLBACK",
-                                () => callback(err)
-                            );
+                            return db.query("ROLLBACK", () => done(err));
                         }
                         const channelQuery = `
                             INSERT INTO device_channels
@@ -768,10 +769,7 @@ function updatedevice(deviceId, userId, productCode, channelCount, callback) {
                         `;
                         let completed = 0;
                         if (channelCount <= 0) {
-                            return db.query(
-                                "COMMIT",
-                                callback
-                            );
+                            return db.query("COMMIT", done);
                         }
                         for (let i = 1; i <= channelCount; i++) {
                             db.query(
@@ -784,17 +782,11 @@ function updatedevice(deviceId, userId, productCode, channelCount, callback) {
                                 ],
                                 (err) => {
                                     if (err) {
-                                        return db.query(
-                                            "ROLLBACK",
-                                            () => callback(err)
-                                        );
+                                        return db.query("ROLLBACK", () => done(err));
                                     }
                                     completed++;
                                     if (completed === channelCount) {
-                                        db.query(
-                                            "COMMIT",
-                                            callback
-                                        );
+                                        db.query("COMMIT", done);
                                     }
                                 }
                             );
