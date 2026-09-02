@@ -615,34 +615,47 @@ function updateDeviceInfo(deviceId, payloadVersion, channelCount, callback = nul
                 return;
             }
             const productCode = result.rows[0].product_code;
-            if (channelCount <= 0) {
-                if (callback) callback(null);
-                return;
-            }
-            const channelQuery = `
-                INSERT INTO device_channels
-                (device_id, channel_id, product_code, channel_name)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (device_id, channel_id) DO NOTHING
-            `;
-            let completed = 0;
-            let queryError = null;
-            for (let i = 1; i <= channelCount; i++) {
-                db.query(
-                    channelQuery,
-                    [deviceId, i, productCode, `Channel ${i}`],
-                    (err) => {
-                        if (err) {
-                            console.error("Channel sync error:", err.message);
-                            queryError = err;
-                        }
-                        completed++;
-                        if (completed === channelCount && callback) {
-                            callback(queryError);
-                        }
+            db.query(
+                `DELETE FROM device_channels
+                 WHERE device_id = $1
+                   AND channel_id > $2`,
+                [deviceId, channelCount],
+                (err) => {
+                    if (err) {
+                        console.error("Channel cleanup error:", err.message);
+                        if (callback) callback(err);
+                        return;
                     }
-                );
-            }
+                    if (channelCount <= 0) {
+                        if (callback) callback(null);
+                        return;
+                    }
+                    const channelQuery = `
+                        INSERT INTO device_channels
+                        (device_id, channel_id, product_code, channel_name)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (device_id, channel_id) DO NOTHING
+                    `;
+                    let completed = 0;
+                    let queryError = null;
+                    for (let i = 1; i <= channelCount; i++) {
+                        db.query(
+                            channelQuery,
+                            [deviceId, i, productCode, `Channel ${i}`],
+                            (err) => {
+                                if (err) {
+                                    console.error("Channel sync error:", err.message);
+                                    queryError = err;
+                                }
+                                completed++;
+                                if (completed === channelCount && callback) {
+                                    callback(queryError);
+                                }
+                            }
+                        );
+                    }
+                }
+            );
         }
     );
 }
